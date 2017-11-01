@@ -16,10 +16,27 @@
 
 package com.android.bluetooth.btservice;
 
+import android.bluetooth.BluetoothA2dp;
+import android.bluetooth.BluetoothA2dpSink;
 import android.bluetooth.BluetoothAdapter;
+import android.bluetooth.BluetoothAvrcpController;
+import android.bluetooth.BluetoothClass;
 import android.bluetooth.BluetoothDevice;
+import android.bluetooth.BluetoothHeadset;
+import android.bluetooth.BluetoothHeadsetClient;
+import android.bluetooth.BluetoothHidDevice;
+import android.bluetooth.BluetoothHidHost;
+import android.bluetooth.BluetoothMap;
+import android.bluetooth.BluetoothMapClient;
+import android.bluetooth.BluetoothPan;
+import android.bluetooth.BluetoothPbap;
+import android.bluetooth.BluetoothPbapClient;
 import android.bluetooth.BluetoothProfile;
+import android.bluetooth.BluetoothSap;
+import android.content.BroadcastReceiver;
+import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.os.ParcelUuid;
 import android.os.UserHandle;
 import android.util.Log;
@@ -36,24 +53,28 @@ class AdapterProperties {
     private static final boolean VDBG = false;
     private static final String TAG = "BluetoothAdapterProperties";
 
-    private static final int BD_ADDR_LEN = 6; // 6 bytes
+    private static final long DEFAULT_DISCOVERY_TIMEOUT_MS = 12800;
+    private static final int BD_ADDR_LEN = 6; // in bytes
+
     private volatile String mName;
     private volatile byte[] mAddress;
-    private volatile int mBluetoothClass;
+    private volatile BluetoothClass mBluetoothClass;
     private volatile int mScanMode;
     private volatile int mDiscoverableTimeout;
     private volatile ParcelUuid[] mUuids;
-    private CopyOnWriteArrayList<BluetoothDevice> mBondedDevices = new CopyOnWriteArrayList<BluetoothDevice>();
+    private CopyOnWriteArrayList<BluetoothDevice> mBondedDevices =
+            new CopyOnWriteArrayList<BluetoothDevice>();
 
     private int mProfilesConnecting, mProfilesConnected, mProfilesDisconnecting;
-    private HashMap<Integer, Pair<Integer, Integer>> mProfileConnectionState;
-
+    private final HashMap<Integer, Pair<Integer, Integer>> mProfileConnectionState =
+            new HashMap<>();
 
     private volatile int mConnectionState = BluetoothAdapter.STATE_DISCONNECTED;
     private volatile int mState = BluetoothAdapter.STATE_OFF;
 
     private AdapterService mService;
     private boolean mDiscovering;
+    private long mDiscoveryEndMs; //< Time (ms since epoch) that discovery ended or will end.
     private RemoteDevices mRemoteDevices;
     private BluetoothAdapter mAdapter;
     //TODO - all hw capabilities to be exposed as a class
@@ -67,30 +88,105 @@ class AdapterProperties {
     private boolean mIsExtendedScanSupported;
     private boolean mIsDebugLogSupported;
     private boolean mIsActivityAndEnergyReporting;
+    private boolean mIsLe2MPhySupported;
+    private boolean mIsLeCodedPhySupported;
+    private boolean mIsLeExtendedAdvertisingSupported;
+    private boolean mIsLePeriodicAdvertisingSupported;
+    private int mLeMaximumAdvertisingDataLength;
+
+    private boolean mReceiverRegistered;
+    private BroadcastReceiver mReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            String action = intent.getAction();
+            if (action == null) {
+                Log.w(TAG, "Received intent with null action");
+                return;
+            }
+            switch (action) {
+                case BluetoothHeadset.ACTION_CONNECTION_STATE_CHANGED:
+                    sendConnectionStateChange(BluetoothProfile.HEADSET, intent);
+                    break;
+                case BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED:
+                    sendConnectionStateChange(BluetoothProfile.A2DP, intent);
+                    break;
+                case BluetoothHeadsetClient.ACTION_CONNECTION_STATE_CHANGED:
+                    sendConnectionStateChange(BluetoothProfile.HEADSET_CLIENT, intent);
+                    break;
+                case BluetoothA2dpSink.ACTION_CONNECTION_STATE_CHANGED:
+                    sendConnectionStateChange(BluetoothProfile.A2DP_SINK, intent);
+                    break;
+                case BluetoothHidDevice.ACTION_CONNECTION_STATE_CHANGED:
+                    sendConnectionStateChange(BluetoothProfile.HID_DEVICE, intent);
+                    break;
+                case BluetoothHidHost.ACTION_CONNECTION_STATE_CHANGED:
+                    sendConnectionStateChange(BluetoothProfile.HID_HOST, intent);
+                    break;
+                case BluetoothAvrcpController.ACTION_CONNECTION_STATE_CHANGED:
+                    sendConnectionStateChange(BluetoothProfile.AVRCP_CONTROLLER, intent);
+                    break;
+                case BluetoothPan.ACTION_CONNECTION_STATE_CHANGED:
+                    sendConnectionStateChange(BluetoothProfile.PAN, intent);
+                    break;
+                case BluetoothMap.ACTION_CONNECTION_STATE_CHANGED:
+                    sendConnectionStateChange(BluetoothProfile.MAP, intent);
+                    break;
+                case BluetoothMapClient.ACTION_CONNECTION_STATE_CHANGED:
+                    sendConnectionStateChange(BluetoothProfile.MAP_CLIENT, intent);
+                    break;
+                case BluetoothSap.ACTION_CONNECTION_STATE_CHANGED:
+                    sendConnectionStateChange(BluetoothProfile.SAP, intent);
+                    break;
+                case BluetoothPbapClient.ACTION_CONNECTION_STATE_CHANGED:
+                    sendConnectionStateChange(BluetoothProfile.PBAP_CLIENT, intent);
+                    break;
+                case BluetoothPbap.ACTION_CONNECTION_STATE_CHANGED:
+                    sendConnectionStateChange(BluetoothProfile.PBAP, intent);
+                    break;
+                default:
+                    Log.w(TAG, "Received unknown intent " + intent);
+                    break;
+            }
+        }
+    };
 
     // Lock for all getters and setters.
     // If finer grained locking is needer, more locks
     // can be added here.
-    private Object mObject = new Object();
+    private final Object mObject = new Object();
 
-    public AdapterProperties(AdapterService service) {
+    AdapterProperties(AdapterService service) {
         mService = service;
         mAdapter = BluetoothAdapter.getDefaultAdapter();
     }
+
     public void init(RemoteDevices remoteDevices) {
-        if (mProfileConnectionState ==null) {
-            mProfileConnectionState = new HashMap<Integer, Pair<Integer, Integer>>();
-        } else {
-            mProfileConnectionState.clear();
-        }
+        mProfileConnectionState.clear();
         mRemoteDevices = remoteDevices;
+
+        IntentFilter filter = new IntentFilter();
+        filter.addAction(BluetoothHeadset.ACTION_CONNECTION_STATE_CHANGED);
+        filter.addAction(BluetoothHeadsetClient.ACTION_CONNECTION_STATE_CHANGED);
+        filter.addAction(BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED);
+        filter.addAction(BluetoothA2dpSink.ACTION_CONNECTION_STATE_CHANGED);
+        filter.addAction(BluetoothHidDevice.ACTION_CONNECTION_STATE_CHANGED);
+        filter.addAction(BluetoothHidHost.ACTION_CONNECTION_STATE_CHANGED);
+        filter.addAction(BluetoothAvrcpController.ACTION_CONNECTION_STATE_CHANGED);
+        filter.addAction(BluetoothPan.ACTION_CONNECTION_STATE_CHANGED);
+        filter.addAction(BluetoothMap.ACTION_CONNECTION_STATE_CHANGED);
+        filter.addAction(BluetoothMapClient.ACTION_CONNECTION_STATE_CHANGED);
+        filter.addAction(BluetoothSap.ACTION_CONNECTION_STATE_CHANGED);
+        filter.addAction(BluetoothPbapClient.ACTION_CONNECTION_STATE_CHANGED);
+        mService.registerReceiver(mReceiver, filter);
+        mReceiverRegistered = true;
     }
 
     public void cleanup() {
         mRemoteDevices = null;
-        if (mProfileConnectionState != null) {
-            mProfileConnectionState.clear();
-            mProfileConnectionState = null;
+        mProfileConnectionState.clear();
+        if (mReceiverRegistered) {
+            mService.unregisterReceiver(mReceiver);
+            mReceiverRegistered = false;
         }
         mService = null;
         mBondedDevices.clear();
@@ -114,16 +210,45 @@ class AdapterProperties {
      */
     boolean setName(String name) {
         synchronized (mObject) {
-            return mService.setAdapterPropertyNative(
-                    AbstractionLayer.BT_PROPERTY_BDNAME, name.getBytes());
+            return mService.setAdapterPropertyNative(AbstractionLayer.BT_PROPERTY_BDNAME,
+                    name.getBytes());
         }
     }
 
     /**
-     * @return the mClass
+     * Set the Bluetooth Class of Device (CoD) of the adapter.
+     *
+     * <p>Bluetooth stack stores some adapter properties in native BT stack storage and some in the
+     * Java Android stack. Bluetooth CoD is stored in the Android layer through
+     * {@link android.provider.Settings.Global#BLUETOOTH_CLASS_OF_DEVICE}.
+     *
+     * <p>Due to this, the getAdapterPropertyNative and adapterPropertyChangedCallback methods don't
+     * actually update mBluetoothClass. Hence, we update the field mBluetoothClass every time we
+     * successfully update BluetoothClass.
+     *
+     * @param bluetoothClass BluetoothClass of the device
      */
-    int getBluetoothClass() {
-        return mBluetoothClass;
+    boolean setBluetoothClass(BluetoothClass bluetoothClass) {
+        synchronized (mObject) {
+            boolean result =
+                    mService.setAdapterPropertyNative(AbstractionLayer.BT_PROPERTY_CLASS_OF_DEVICE,
+                            bluetoothClass.getClassOfDeviceBytes());
+
+            if (result) {
+                mBluetoothClass = bluetoothClass;
+            }
+
+            return result;
+        }
+    }
+
+    /**
+     * @return the BluetoothClass of the Bluetooth adapter.
+     */
+    BluetoothClass getBluetoothClass() {
+        synchronized (mObject) {
+            return mBluetoothClass;
+        }
     }
 
     /**
@@ -140,8 +265,8 @@ class AdapterProperties {
      */
     boolean setScanMode(int scanMode) {
         synchronized (mObject) {
-            return mService.setAdapterPropertyNative(
-                    AbstractionLayer.BT_PROPERTY_ADAPTER_SCAN_MODE, Utils.intToByteArray(scanMode));
+            return mService.setAdapterPropertyNative(AbstractionLayer.BT_PROPERTY_ADAPTER_SCAN_MODE,
+                    Utils.intToByteArray(scanMode));
         }
     }
 
@@ -150,18 +275,6 @@ class AdapterProperties {
      */
     ParcelUuid[] getUuids() {
         return mUuids;
-    }
-
-    /**
-     * Set local adapter UUIDs.
-     *
-     * @param uuids the uuids to be set.
-     */
-    boolean setUuids(ParcelUuid[] uuids) {
-        synchronized (mObject) {
-            return mService.setAdapterPropertyNative(
-                    AbstractionLayer.BT_PROPERTY_UUIDS, Utils.uuidsToByteArray(uuids));
-        }
     }
 
     /**
@@ -243,6 +356,41 @@ class AdapterProperties {
     }
 
     /**
+     * @return the mIsLe2MPhySupported
+     */
+    boolean isLe2MPhySupported() {
+        return mIsLe2MPhySupported;
+    }
+
+    /**
+     * @return the mIsLeCodedPhySupported
+     */
+    boolean isLeCodedPhySupported() {
+        return mIsLeCodedPhySupported;
+    }
+
+    /**
+     * @return the mIsLeExtendedAdvertisingSupported
+     */
+    boolean isLeExtendedAdvertisingSupported() {
+        return mIsLeExtendedAdvertisingSupported;
+    }
+
+    /**
+     * @return the mIsLePeriodicAdvertisingSupported
+     */
+    boolean isLePeriodicAdvertisingSupported() {
+        return mIsLePeriodicAdvertisingSupported;
+    }
+
+    /**
+     * @return the getLeMaximumAdvertisingDataLength
+     */
+    int getLeMaximumAdvertisingDataLength() {
+        return mLeMaximumAdvertisingDataLength;
+    }
+
+    /**
      * @return total number of trackable advertisements
      */
     int getTotalNumOfTrackableAdvertisements() {
@@ -256,7 +404,7 @@ class AdapterProperties {
         BluetoothDevice[] bondedDeviceList = new BluetoothDevice[0];
         try {
             bondedDeviceList = mBondedDevices.toArray(bondedDeviceList);
-        } catch(ArrayStoreException ee) {
+        } catch (ArrayStoreException ee) {
             errorLog("Error retrieving bonded device array");
         }
         infoLog("getBondedDevices: length=" + bondedDeviceList.length);
@@ -265,33 +413,35 @@ class AdapterProperties {
 
     // This function shall be invoked from BondStateMachine whenever the bond
     // state changes.
-    void onBondStateChanged(BluetoothDevice device, int state)
-    {
-        if(device == null)
+    void onBondStateChanged(BluetoothDevice device, int state) {
+        if (device == null) {
+            Log.w(TAG, "onBondStateChanged, device is null");
             return;
+        }
         try {
             byte[] addrByte = Utils.getByteAddress(device);
             DeviceProperties prop = mRemoteDevices.getDeviceProperties(device);
-            if (prop == null)
+            if (prop == null) {
                 prop = mRemoteDevices.addDeviceProperties(addrByte);
+            }
             prop.setBondState(state);
 
             if (state == BluetoothDevice.BOND_BONDED) {
                 // add if not already in list
-                if(!mBondedDevices.contains(device)) {
-                    debugLog("Adding bonded device:" +  device);
+                if (!mBondedDevices.contains(device)) {
+                    debugLog("Adding bonded device:" + device);
                     mBondedDevices.add(device);
                 }
             } else if (state == BluetoothDevice.BOND_NONE) {
                 // remove device from list
-                if (mBondedDevices.remove(device))
-                    debugLog("Removing bonded device:" +  device);
-                else
+                if (mBondedDevices.remove(device)) {
+                    debugLog("Removing bonded device:" + device);
+                } else {
                     debugLog("Failed to remove device: " + device);
+                }
             }
-        }
-        catch(Exception ee) {
-            Log.e(TAG, "Exception in onBondStateChanged : ", ee);
+        } catch (Exception ee) {
+            Log.w(TAG, "onBondStateChanged: Exception ", ee);
         }
     }
 
@@ -310,24 +460,44 @@ class AdapterProperties {
     int getProfileConnectionState(int profile) {
         synchronized (mObject) {
             Pair<Integer, Integer> p = mProfileConnectionState.get(profile);
-            if (p != null) return p.first;
+            if (p != null) {
+                return p.first;
+            }
             return BluetoothProfile.STATE_DISCONNECTED;
         }
+    }
+
+    long discoveryEndMillis() {
+        return mDiscoveryEndMs;
     }
 
     boolean isDiscovering() {
         return mDiscovering;
     }
 
+    private void sendConnectionStateChange(int profile, Intent connIntent) {
+        BluetoothDevice device = connIntent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
+        int prevState = connIntent.getIntExtra(BluetoothProfile.EXTRA_PREVIOUS_STATE, -1);
+        int state = connIntent.getIntExtra(BluetoothProfile.EXTRA_STATE, -1);
+        Log.d(TAG,
+                "PROFILE_CONNECTION_STATE_CHANGE: profile=" + profile + ", device=" + device + ", "
+                        + prevState + " -> " + state);
+        if (!isNormalStateTransition(prevState, state)) {
+            Log.w(TAG,
+                    "PROFILE_CONNECTION_STATE_CHANGE: unexpected transition for profile=" + profile
+                            + ", device=" + device + ", " + prevState + " -> " + state);
+        }
+        sendConnectionStateChange(device, profile, state, prevState);
+    }
+
     void sendConnectionStateChange(BluetoothDevice device, int profile, int state, int prevState) {
-        if (!validateProfileConnectionState(state) ||
-                !validateProfileConnectionState(prevState)) {
+        if (!validateProfileConnectionState(state) || !validateProfileConnectionState(prevState)) {
             // Previously, an invalid state was broadcast anyway,
             // with the invalid state converted to -1 in the intent.
             // Better to log an error and not send an intent with
             // invalid contents or set mAdapterConnectionState to -1.
-            errorLog("Error in sendConnectionStateChange: "
-                    + "prevState " + prevState + " state " + state);
+            errorLog("sendConnectionStateChange: invalid state transition " + prevState + " -> "
+                    + state);
             return;
         }
 
@@ -335,32 +505,34 @@ class AdapterProperties {
             updateProfileConnectionState(profile, state, prevState);
 
             if (updateCountersAndCheckForConnectionStateChange(state, prevState)) {
-                setConnectionState(state);
+                int newAdapterState = convertToAdapterState(state);
+                int prevAdapterState = convertToAdapterState(prevState);
+                setConnectionState(newAdapterState);
 
                 Intent intent = new Intent(BluetoothAdapter.ACTION_CONNECTION_STATE_CHANGED);
                 intent.putExtra(BluetoothDevice.EXTRA_DEVICE, device);
-                intent.putExtra(BluetoothAdapter.EXTRA_CONNECTION_STATE,
-                        convertToAdapterState(state));
-                intent.putExtra(BluetoothAdapter.EXTRA_PREVIOUS_CONNECTION_STATE,
-                        convertToAdapterState(prevState));
+                intent.putExtra(BluetoothAdapter.EXTRA_CONNECTION_STATE, newAdapterState);
+                intent.putExtra(BluetoothAdapter.EXTRA_PREVIOUS_CONNECTION_STATE, prevAdapterState);
                 intent.addFlags(Intent.FLAG_RECEIVER_REGISTERED_ONLY_BEFORE_BOOT);
-                mService.sendBroadcastAsUser(intent, UserHandle.ALL,
-                        mService.BLUETOOTH_PERM);
-                Log.d(TAG, "CONNECTION_STATE_CHANGE: " + device + ": "
-                        + prevState + " -> " + state);
+                Log.d(TAG, "ADAPTER_CONNECTION_STATE_CHANGE: " + device + ": " + prevAdapterState
+                        + " -> " + newAdapterState);
+                if (!isNormalStateTransition(prevState, state)) {
+                    Log.w(TAG, "ADAPTER_CONNECTION_STATE_CHANGE: unexpected transition for profile="
+                            + profile + ", device=" + device + ", " + prevState + " -> " + state);
+                }
+                mService.sendBroadcastAsUser(intent, UserHandle.ALL, AdapterService.BLUETOOTH_PERM);
             }
         }
     }
 
     private boolean validateProfileConnectionState(int state) {
-        return (state == BluetoothProfile.STATE_DISCONNECTED ||
-                state == BluetoothProfile.STATE_CONNECTING ||
-                state == BluetoothProfile.STATE_CONNECTED ||
-                state == BluetoothProfile.STATE_DISCONNECTING);
+        return (state == BluetoothProfile.STATE_DISCONNECTED
+                || state == BluetoothProfile.STATE_CONNECTING
+                || state == BluetoothProfile.STATE_CONNECTED
+                || state == BluetoothProfile.STATE_DISCONNECTING);
     }
 
-
-    private int convertToAdapterState(int state) {
+    private static int convertToAdapterState(int state) {
         switch (state) {
             case BluetoothProfile.STATE_DISCONNECTED:
                 return BluetoothAdapter.STATE_DISCONNECTED;
@@ -371,22 +543,55 @@ class AdapterProperties {
             case BluetoothProfile.STATE_CONNECTING:
                 return BluetoothAdapter.STATE_CONNECTING;
         }
-        Log.e(TAG, "Error in convertToAdapterState");
+        Log.e(TAG, "convertToAdapterState, unknow state " + state);
         return -1;
+    }
+
+    private static boolean isNormalStateTransition(int prevState, int nextState) {
+        switch (prevState) {
+            case BluetoothProfile.STATE_DISCONNECTED:
+                return nextState == BluetoothProfile.STATE_CONNECTING;
+            case BluetoothProfile.STATE_CONNECTED:
+                return nextState == BluetoothProfile.STATE_DISCONNECTING;
+            case BluetoothProfile.STATE_DISCONNECTING:
+            case BluetoothProfile.STATE_CONNECTING:
+                return (nextState == BluetoothProfile.STATE_DISCONNECTED) || (nextState
+                        == BluetoothProfile.STATE_CONNECTED);
+            default:
+                return false;
+        }
     }
 
     private boolean updateCountersAndCheckForConnectionStateChange(int state, int prevState) {
         switch (prevState) {
             case BluetoothProfile.STATE_CONNECTING:
-                mProfilesConnecting--;
+                if (mProfilesConnecting > 0) {
+                    mProfilesConnecting--;
+                } else {
+                    Log.e(TAG, "mProfilesConnecting " + mProfilesConnecting);
+                    throw new IllegalStateException(
+                            "Invalid state transition, " + prevState + " -> " + state);
+                }
                 break;
 
             case BluetoothProfile.STATE_CONNECTED:
-                mProfilesConnected--;
+                if (mProfilesConnected > 0) {
+                    mProfilesConnected--;
+                } else {
+                    Log.e(TAG, "mProfilesConnected " + mProfilesConnected);
+                    throw new IllegalStateException(
+                            "Invalid state transition, " + prevState + " -> " + state);
+                }
                 break;
 
             case BluetoothProfile.STATE_DISCONNECTING:
-                mProfilesDisconnecting--;
+                if (mProfilesDisconnecting > 0) {
+                    mProfilesDisconnecting--;
+                } else {
+                    Log.e(TAG, "mProfilesDisconnecting " + mProfilesDisconnecting);
+                    throw new IllegalStateException(
+                            "Invalid state transition, " + prevState + " -> " + state);
+                }
                 break;
         }
 
@@ -437,28 +642,27 @@ class AdapterProperties {
             numDev = stateNumDev.second;
 
             if (newState == currHashState) {
-                numDev ++;
-            } else if (newState == BluetoothProfile.STATE_CONNECTED ||
-                   (newState == BluetoothProfile.STATE_CONNECTING &&
-                    currHashState != BluetoothProfile.STATE_CONNECTED)) {
-                 numDev = 1;
+                numDev++;
+            } else if (newState == BluetoothProfile.STATE_CONNECTED || (
+                    newState == BluetoothProfile.STATE_CONNECTING
+                            && currHashState != BluetoothProfile.STATE_CONNECTED)) {
+                numDev = 1;
             } else if (numDev == 1 && oldState == currHashState) {
-                 update = true;
+                update = true;
             } else if (numDev > 1 && oldState == currHashState) {
-                 numDev --;
+                numDev--;
 
-                 if (currHashState == BluetoothProfile.STATE_CONNECTED ||
-                     currHashState == BluetoothProfile.STATE_CONNECTING) {
+                if (currHashState == BluetoothProfile.STATE_CONNECTED
+                        || currHashState == BluetoothProfile.STATE_CONNECTING) {
                     newHashState = currHashState;
-                 }
+                }
             } else {
-                 update = false;
+                update = false;
             }
         }
 
         if (update) {
-            mProfileConnectionState.put(profile, new Pair<Integer, Integer>(newHashState,
-                    numDev));
+            mProfileConnectionState.put(profile, new Pair<Integer, Integer>(newHashState, numDev));
         }
     }
 
@@ -478,27 +682,41 @@ class AdapterProperties {
                         intent.putExtra(BluetoothAdapter.EXTRA_LOCAL_NAME, mName);
                         intent.addFlags(Intent.FLAG_RECEIVER_REGISTERED_ONLY_BEFORE_BOOT);
                         mService.sendBroadcastAsUser(intent, UserHandle.ALL,
-                                 mService.BLUETOOTH_PERM);
+                                AdapterService.BLUETOOTH_PERM);
                         debugLog("Name is: " + mName);
                         break;
                     case AbstractionLayer.BT_PROPERTY_BDADDR:
                         mAddress = val;
-                        debugLog("Address is:" + Utils.getAddressStringFromByte(mAddress));
+                        String address = Utils.getAddressStringFromByte(mAddress);
+                        debugLog("Address is:" + address);
+                        intent = new Intent(BluetoothAdapter.ACTION_BLUETOOTH_ADDRESS_CHANGED);
+                        intent.putExtra(BluetoothAdapter.EXTRA_BLUETOOTH_ADDRESS, address);
+                        intent.addFlags(Intent.FLAG_RECEIVER_REGISTERED_ONLY_BEFORE_BOOT);
+                        mService.sendBroadcastAsUser(intent, UserHandle.ALL,
+                                AdapterService.BLUETOOTH_PERM);
                         break;
                     case AbstractionLayer.BT_PROPERTY_CLASS_OF_DEVICE:
-                        mBluetoothClass = Utils.byteArrayToInt(val, 0);
+                        if (val == null || val.length != 3) {
+                            debugLog("Invalid BT CoD value from stack.");
+                            return;
+                        }
+                        int bluetoothClass =
+                                ((int) val[0] << 16) + ((int) val[1] << 8) + (int) val[2];
+                        if (bluetoothClass != 0) {
+                            mBluetoothClass = new BluetoothClass(bluetoothClass);
+                        }
                         debugLog("BT Class:" + mBluetoothClass);
                         break;
                     case AbstractionLayer.BT_PROPERTY_ADAPTER_SCAN_MODE:
                         int mode = Utils.byteArrayToInt(val, 0);
-                        mScanMode = mService.convertScanModeFromHal(mode);
+                        mScanMode = AdapterService.convertScanModeFromHal(mode);
                         intent = new Intent(BluetoothAdapter.ACTION_SCAN_MODE_CHANGED);
                         intent.putExtra(BluetoothAdapter.EXTRA_SCAN_MODE, mScanMode);
                         intent.addFlags(Intent.FLAG_RECEIVER_REGISTERED_ONLY_BEFORE_BOOT);
-                        mService.sendBroadcast(intent, mService.BLUETOOTH_PERM);
+                        mService.sendBroadcast(intent, AdapterService.BLUETOOTH_PERM);
                         debugLog("Scan Mode:" + mScanMode);
                         if (mBluetoothDisabling) {
-                            mBluetoothDisabling=false;
+                            mBluetoothDisabling = false;
                             mService.startBluetoothDisable();
                         }
                         break;
@@ -506,13 +724,13 @@ class AdapterProperties {
                         mUuids = Utils.byteArrayToUuid(val);
                         break;
                     case AbstractionLayer.BT_PROPERTY_ADAPTER_BONDED_DEVICES:
-                        int number = val.length/BD_ADDR_LEN;
+                        int number = val.length / BD_ADDR_LEN;
                         byte[] addrByte = new byte[BD_ADDR_LEN];
                         for (int j = 0; j < number; j++) {
                             System.arraycopy(val, j * BD_ADDR_LEN, addrByte, 0, BD_ADDR_LEN);
                             onBondStateChanged(mAdapter.getRemoteDevice(
-                                               Utils.getAddressStringFromByte(addrByte)),
-                                               BluetoothDevice.BOND_BONDED);
+                                    Utils.getAddressStringFromByte(addrByte)),
+                                    BluetoothDevice.BOND_BONDED);
                         }
                         break;
                     case AbstractionLayer.BT_PROPERTY_ADAPTER_DISCOVERABLE_TIMEOUT:
@@ -531,62 +749,66 @@ class AdapterProperties {
         }
     }
 
-    void updateFeatureSupport(byte[] val) {
-        mVersSupported = ((0xFF & ((int)val[1])) << 8)
-                            + (0xFF & ((int)val[0]));
-        mNumOfAdvertisementInstancesSupported = (0xFF & ((int)val[3]));
-        mRpaOffloadSupported = ((0xFF & ((int)val[4]))!= 0);
-        mNumOfOffloadedIrkSupported =  (0xFF & ((int)val[5]));
-        mNumOfOffloadedScanFilterSupported = (0xFF & ((int)val[6]));
-        mIsActivityAndEnergyReporting = ((0xFF & ((int)val[7])) != 0);
-        mOffloadedScanResultStorageBytes = ((0xFF & ((int)val[9])) << 8)
-                            + (0xFF & ((int)val[8]));
-        mTotNumOfTrackableAdv = ((0xFF & ((int)val[11])) << 8)
-                            + (0xFF & ((int)val[10]));
-        mIsExtendedScanSupported = ((0xFF & ((int)val[12])) != 0);
-        mIsDebugLogSupported = ((0xFF & ((int)val[13])) != 0);
+    private void updateFeatureSupport(byte[] val) {
+        mVersSupported = ((0xFF & ((int) val[1])) << 8) + (0xFF & ((int) val[0]));
+        mNumOfAdvertisementInstancesSupported = (0xFF & ((int) val[3]));
+        mRpaOffloadSupported = ((0xFF & ((int) val[4])) != 0);
+        mNumOfOffloadedIrkSupported = (0xFF & ((int) val[5]));
+        mNumOfOffloadedScanFilterSupported = (0xFF & ((int) val[6]));
+        mIsActivityAndEnergyReporting = ((0xFF & ((int) val[7])) != 0);
+        mOffloadedScanResultStorageBytes = ((0xFF & ((int) val[9])) << 8) + (0xFF & ((int) val[8]));
+        mTotNumOfTrackableAdv = ((0xFF & ((int) val[11])) << 8) + (0xFF & ((int) val[10]));
+        mIsExtendedScanSupported = ((0xFF & ((int) val[12])) != 0);
+        mIsDebugLogSupported = ((0xFF & ((int) val[13])) != 0);
+        mIsLe2MPhySupported = ((0xFF & ((int) val[14])) != 0);
+        mIsLeCodedPhySupported = ((0xFF & ((int) val[15])) != 0);
+        mIsLeExtendedAdvertisingSupported = ((0xFF & ((int) val[16])) != 0);
+        mIsLePeriodicAdvertisingSupported = ((0xFF & ((int) val[17])) != 0);
+        mLeMaximumAdvertisingDataLength =
+                (0xFF & ((int) val[18])) + ((0xFF & ((int) val[19])) << 8);
 
         Log.d(TAG, "BT_PROPERTY_LOCAL_LE_FEATURES: update from BT controller"
                 + " mNumOfAdvertisementInstancesSupported = "
-                + mNumOfAdvertisementInstancesSupported
-                + " mRpaOffloadSupported = " + mRpaOffloadSupported
-                + " mNumOfOffloadedIrkSupported = "
-                + mNumOfOffloadedIrkSupported
-                + " mNumOfOffloadedScanFilterSupported = "
-                + mNumOfOffloadedScanFilterSupported
-                + " mOffloadedScanResultStorageBytes= "
-                + mOffloadedScanResultStorageBytes
-                + " mIsActivityAndEnergyReporting = "
-                + mIsActivityAndEnergyReporting
-                +" mVersSupported = "
-                + mVersSupported
-                + " mTotNumOfTrackableAdv = "
-                + mTotNumOfTrackableAdv
-                + " mIsExtendedScanSupported = "
-                + mIsExtendedScanSupported
-                + " mIsDebugLogSupported = "
-                + mIsDebugLogSupported
-                );
+                + mNumOfAdvertisementInstancesSupported + " mRpaOffloadSupported = "
+                + mRpaOffloadSupported + " mNumOfOffloadedIrkSupported = "
+                + mNumOfOffloadedIrkSupported + " mNumOfOffloadedScanFilterSupported = "
+                + mNumOfOffloadedScanFilterSupported + " mOffloadedScanResultStorageBytes= "
+                + mOffloadedScanResultStorageBytes + " mIsActivityAndEnergyReporting = "
+                + mIsActivityAndEnergyReporting + " mVersSupported = " + mVersSupported
+                + " mTotNumOfTrackableAdv = " + mTotNumOfTrackableAdv
+                + " mIsExtendedScanSupported = " + mIsExtendedScanSupported
+                + " mIsDebugLogSupported = " + mIsDebugLogSupported + " mIsLe2MPhySupported = "
+                + mIsLe2MPhySupported + " mIsLeCodedPhySupported = " + mIsLeCodedPhySupported
+                + " mIsLeExtendedAdvertisingSupported = " + mIsLeExtendedAdvertisingSupported
+                + " mIsLePeriodicAdvertisingSupported = " + mIsLePeriodicAdvertisingSupported
+                + " mLeMaximumAdvertisingDataLength = " + mLeMaximumAdvertisingDataLength);
     }
 
     void onBluetoothReady() {
-        Log.d(TAG, "ScanMode =  " + mScanMode );
-        Log.d(TAG, "State =  " + getState() );
+        debugLog("onBluetoothReady, state=" + getState() + ", ScanMode=" + mScanMode);
 
-        // When BT is being turned on, all adapter properties will be sent in 1
-        // callback. At this stage, set the scan mode.
         synchronized (mObject) {
-            if (getState() == BluetoothAdapter.STATE_TURNING_ON &&
-                    mScanMode == BluetoothAdapter.SCAN_MODE_NONE) {
+            // Reset adapter and profile connection states
+            setConnectionState(BluetoothAdapter.STATE_DISCONNECTED);
+            mProfileConnectionState.clear();
+            mProfilesConnected = 0;
+            mProfilesConnecting = 0;
+            mProfilesDisconnecting = 0;
+            // When BT is being turned on, all adapter properties will be sent in 1
+            // callback. At this stage, set the scan mode.
+            if (getState() == BluetoothAdapter.STATE_TURNING_ON
+                    && mScanMode == BluetoothAdapter.SCAN_MODE_NONE) {
                     /* mDiscoverableTimeout is part of the
                        adapterPropertyChangedCallback received before
                        onBluetoothReady */
-                    if (mDiscoverableTimeout != 0)
-                      setScanMode(AbstractionLayer.BT_SCAN_MODE_CONNECTABLE);
-                    else /* if timeout == never (0) at startup */
-                      setScanMode(AbstractionLayer.BT_SCAN_MODE_CONNECTABLE_DISCOVERABLE);
-                    /* though not always required, this keeps NV up-to date on first-boot after flash */
-                    setDiscoverableTimeout(mDiscoverableTimeout);
+                if (mDiscoverableTimeout != 0) {
+                    setScanMode(AbstractionLayer.BT_SCAN_MODE_CONNECTABLE);
+                } else /* if timeout == never (0) at startup */ {
+                    setScanMode(AbstractionLayer.BT_SCAN_MODE_CONNECTABLE_DISCOVERABLE);
+                }
+                    /* though not always required, this keeps NV up-to date on first-boot after
+                    flash */
+                setDiscoverableTimeout(mDiscoverableTimeout);
             }
         }
     }
@@ -599,7 +821,7 @@ class AdapterProperties {
         // so no incoming connections are possible
         debugLog("onBleDisable");
         if (getState() == BluetoothAdapter.STATE_BLE_TURNING_OFF) {
-           setScanMode(AbstractionLayer.BT_SCAN_MODE_NONE);
+            setScanMode(AbstractionLayer.BT_SCAN_MODE_NONE);
         }
     }
 
@@ -625,25 +847,31 @@ class AdapterProperties {
             Intent intent;
             if (state == AbstractionLayer.BT_DISCOVERY_STOPPED) {
                 mDiscovering = false;
+                mDiscoveryEndMs = System.currentTimeMillis();
                 intent = new Intent(BluetoothAdapter.ACTION_DISCOVERY_FINISHED);
-                mService.sendBroadcast(intent, mService.BLUETOOTH_PERM);
+                mService.sendBroadcast(intent, AdapterService.BLUETOOTH_PERM);
             } else if (state == AbstractionLayer.BT_DISCOVERY_STARTED) {
                 mDiscovering = true;
+                mDiscoveryEndMs = System.currentTimeMillis() + DEFAULT_DISCOVERY_TIMEOUT_MS;
                 intent = new Intent(BluetoothAdapter.ACTION_DISCOVERY_STARTED);
-                mService.sendBroadcast(intent, mService.BLUETOOTH_PERM);
+                mService.sendBroadcast(intent, AdapterService.BLUETOOTH_PERM);
             }
         }
     }
 
-    private void infoLog(String msg) {
-        if (VDBG) Log.i(TAG, msg);
+    private static void infoLog(String msg) {
+        if (VDBG) {
+            Log.i(TAG, msg);
+        }
     }
 
-    private void debugLog(String msg) {
-        if (DBG) Log.d(TAG, msg);
+    private static void debugLog(String msg) {
+        if (DBG) {
+            Log.d(TAG, msg);
+        }
     }
 
-    private void errorLog(String msg) {
+    private static void errorLog(String msg) {
         Log.e(TAG, msg);
     }
 }

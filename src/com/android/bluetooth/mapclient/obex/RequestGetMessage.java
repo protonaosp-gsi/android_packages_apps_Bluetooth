@@ -42,8 +42,7 @@ final class RequestGetMessage extends Request {
 
     private Bmessage mBmessage;
 
-    public RequestGetMessage(String handle, MasClient.CharsetType charset,
-            boolean attachment) {
+    RequestGetMessage(String handle, MasClient.CharsetType charset, boolean attachment) {
 
         mHeaderSet.setHeader(HeaderSet.NAME, handle);
 
@@ -52,8 +51,7 @@ final class RequestGetMessage extends Request {
         ObexAppParameters oap = new ObexAppParameters();
 
         oap.add(OAP_TAGID_CHARSET,
-                MasClient.CharsetType.UTF_8.equals(charset) ? CHARSET_UTF8
-                        : CHARSET_NATIVE);
+                MasClient.CharsetType.UTF_8.equals(charset) ? CHARSET_UTF8 : CHARSET_NATIVE);
 
         oap.add(OAP_TAGID_ATTACHMENT, attachment ? ATTACHMENT_ON : ATTACHMENT_OFF);
 
@@ -96,6 +94,15 @@ final class RequestGetMessage extends Request {
 
     public Bmessage getMessage() {
         return mBmessage;
+    }
+
+    public String getHandle() {
+        try {
+            return (String) mHeaderSet.getHeader(HeaderSet.NAME);
+        } catch (IOException e) {
+            Log.e(TAG, "Unexpected exception while reading handle!", e);
+            return null;
+        }
     }
 
     @Override

@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.google.android.car.pbapsink;
+package com.android.bluetooth.pbapclient;
 
 import android.accounts.AbstractAccountAuthenticator;
 import android.accounts.Account;
@@ -49,8 +49,8 @@ public class Authenticator extends AbstractAccountAuthenticator {
 
     // Ignore attempts to confirm credentials
     @Override
-    public Bundle confirmCredentials(AccountAuthenticatorResponse r, Account account,
-            Bundle bundle) throws NetworkErrorException {
+    public Bundle confirmCredentials(AccountAuthenticatorResponse r, Account account, Bundle bundle)
+            throws NetworkErrorException {
         Log.d(TAG, "got call", new Exception());
         return null;
     }

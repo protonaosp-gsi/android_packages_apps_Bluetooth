@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- package name must be unique so suffix with "tests" so package loader doesn't ignore us -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-          package="com.android.bluetooth.tests">
+          package="com.android.bluetooth.tests"
+          android:sharedUserId="android.uid.bluetooth">
 
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.ACCESS_BLUETOOTH_SHARE" />
@@ -54,6 +55,7 @@
         android:allowBackup="true" >
         <uses-library android:name="android.test.runner" />
         <uses-permission android:name="android.permission.ACCESS_BLUETOOTH_SHARE" />
+        <uses-library android:name="org.apache.http.legacy" android:required="false" />
         <uses-permission android:name="com.android.permission.WHITELIST_BLUETOOTH_DEVICE" />
         <path-permission
                 android:pathPrefix="/btopp"

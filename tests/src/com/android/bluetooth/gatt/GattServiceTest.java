@@ -1,22 +1,25 @@
-
 package com.android.bluetooth.gatt;
 
-import android.test.AndroidTestCase;
-import android.test.suitebuilder.annotation.SmallTest;
+import android.support.test.filters.SmallTest;
+import android.support.test.runner.AndroidJUnit4;
 
-import com.android.bluetooth.gatt.GattService;
+import org.junit.Assert;
+import org.junit.Test;
+import org.junit.runner.RunWith;
 
 /**
  * Test cases for {@link GattService}.
  */
-public class GattServiceTest extends AndroidTestCase {
-
-    @SmallTest
+@SmallTest
+@RunWith(AndroidJUnit4.class)
+public class GattServiceTest {
+    @Test
     public void testParseBatchTimestamp() {
         GattService service = new GattService();
-        long timestampNanos = service.parseTimestampNanos(new byte[] {
-                -54, 7 });
-        assertEquals(99700000000L, timestampNanos);
+        long timestampNanos = service.parseTimestampNanos(new byte[]{
+                -54, 7
+        });
+        Assert.assertEquals(99700000000L, timestampNanos);
     }
 
 }

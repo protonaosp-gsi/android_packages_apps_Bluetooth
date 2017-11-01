@@ -32,8 +32,6 @@
 
 package com.android.bluetooth.pbap;
 
-import com.android.bluetooth.R;
-
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.DialogInterface;
@@ -44,15 +42,16 @@ import android.os.Handler;
 import android.os.Message;
 import android.preference.Preference;
 import android.text.InputFilter;
-import android.text.TextWatcher;
 import android.text.InputFilter.LengthFilter;
+import android.text.TextWatcher;
 import android.util.Log;
 import android.view.View;
+import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.TextView;
-import android.widget.Button;
 
+import com.android.bluetooth.R;
 import com.android.internal.app.AlertActivity;
 import com.android.internal.app.AlertController;
 
@@ -61,8 +60,9 @@ import com.android.internal.app.AlertController;
  * the other prompts the user to enter a session key for authentication with a
  * remote Bluetooth device.
  */
-public class BluetoothPbapActivity extends AlertActivity implements
-        DialogInterface.OnClickListener, Preference.OnPreferenceChangeListener, TextWatcher {
+public class BluetoothPbapActivity extends AlertActivity
+        implements DialogInterface.OnClickListener, Preference.OnPreferenceChangeListener,
+        TextWatcher {
     private static final String TAG = "BluetoothPbapActivity";
 
     private static final boolean V = BluetoothPbapService.VERBOSE;
@@ -77,7 +77,7 @@ public class BluetoothPbapActivity extends AlertActivity implements
 
     private EditText mKeyView;
 
-    private TextView messageView;
+    private TextView mMessageView;
 
     private String mSessionKey = "";
 
@@ -118,8 +118,8 @@ public class BluetoothPbapActivity extends AlertActivity implements
                     + "PBAP_ACCESS_REQUEST or PBAP_AUTH_CHALL ");
             finish();
         }
-        registerReceiver(mReceiver, new IntentFilter(
-                BluetoothPbapService.USER_CONFIRM_TIMEOUT_ACTION));
+        registerReceiver(mReceiver,
+                new IntentFilter(BluetoothPbapService.USER_CONFIRM_TIMEOUT_ACTION));
     }
 
     private void showPbapDialog(int id) {
@@ -156,12 +156,12 @@ public class BluetoothPbapActivity extends AlertActivity implements
         switch (id) {
             case DIALOG_YES_NO_AUTH:
                 mView = getLayoutInflater().inflate(R.layout.auth, null);
-                messageView = (TextView)mView.findViewById(R.id.message);
-                messageView.setText(createDisplayText(id));
-                mKeyView = (EditText)mView.findViewById(R.id.text);
+                mMessageView = (TextView) mView.findViewById(R.id.message);
+                mMessageView.setText(createDisplayText(id));
+                mKeyView = (EditText) mView.findViewById(R.id.text);
                 mKeyView.addTextChangedListener(this);
-                mKeyView.setFilters(new InputFilter[] {
-                    new LengthFilter(BLUETOOTH_OBEX_AUTHKEY_MAX_LENGTH)
+                mKeyView.setFilters(new InputFilter[]{
+                        new LengthFilter(BLUETOOTH_OBEX_AUTHKEY_MAX_LENGTH)
                 });
                 return mView;
             default:
@@ -192,8 +192,7 @@ public class BluetoothPbapActivity extends AlertActivity implements
     private void sendIntentToReceiver(final String intentName, final String extraName,
             final String extraValue) {
         Intent intent = new Intent(intentName);
-        intent.setClassName(BluetoothPbapService.THIS_PACKAGE_NAME, BluetoothPbapReceiver.class
-                .getName());
+        intent.setPackage(BluetoothPbapService.THIS_PACKAGE_NAME);
         if (extraName != null) {
             intent.putExtra(extraName, extraValue);
         }
@@ -203,14 +202,14 @@ public class BluetoothPbapActivity extends AlertActivity implements
     private void sendIntentToReceiver(final String intentName, final String extraName,
             final boolean extraValue) {
         Intent intent = new Intent(intentName);
-        intent.setClassName(BluetoothPbapService.THIS_PACKAGE_NAME, BluetoothPbapReceiver.class
-                .getName());
+        intent.setPackage(BluetoothPbapService.THIS_PACKAGE_NAME);
         if (extraName != null) {
             intent.putExtra(extraName, extraValue);
         }
         sendBroadcast(intent);
     }
 
+    @Override
     public void onClick(DialogInterface dialog, int which) {
         switch (which) {
             case DialogInterface.BUTTON_POSITIVE:
@@ -231,7 +230,7 @@ public class BluetoothPbapActivity extends AlertActivity implements
     private void onTimeout() {
         mTimeout = true;
         if (mCurrentDialog == DIALOG_YES_NO_AUTH) {
-            messageView.setText(getString(R.string.pbap_authentication_timeout_message,
+            mMessageView.setText(getString(R.string.pbap_authentication_timeout_message,
                     BluetoothPbapService.getRemoteDeviceName()));
             mKeyView.setVisibility(View.GONE);
             mKeyView.clearFocus();
@@ -248,7 +247,9 @@ public class BluetoothPbapActivity extends AlertActivity implements
     protected void onRestoreInstanceState(Bundle savedInstanceState) {
         super.onRestoreInstanceState(savedInstanceState);
         mTimeout = savedInstanceState.getBoolean(KEY_USER_TIMEOUT);
-        if (V) Log.v(TAG, "onRestoreInstanceState() mTimeout: " + mTimeout);
+        if (V) {
+            Log.v(TAG, "onRestoreInstanceState() mTimeout: " + mTimeout);
+        }
         if (mTimeout) {
             onTimeout();
         }
@@ -266,16 +267,20 @@ public class BluetoothPbapActivity extends AlertActivity implements
         unregisterReceiver(mReceiver);
     }
 
+    @Override
     public boolean onPreferenceChange(Preference preference, Object newValue) {
         return true;
     }
 
+    @Override
     public void beforeTextChanged(CharSequence s, int start, int before, int after) {
     }
 
+    @Override
     public void onTextChanged(CharSequence s, int start, int before, int count) {
     }
 
+    @Override
     public void afterTextChanged(android.text.Editable s) {
         if (s.length() > 0) {
             mOkButton.setEnabled(true);
@@ -287,7 +292,9 @@ public class BluetoothPbapActivity extends AlertActivity implements
         public void handleMessage(Message msg) {
             switch (msg.what) {
                 case DISMISS_TIMEOUT_DIALOG:
-                    if (V) Log.v(TAG, "Received DISMISS_TIMEOUT_DIALOG msg.");
+                    if (V) {
+                        Log.v(TAG, "Received DISMISS_TIMEOUT_DIALOG msg.");
+                    }
                     finish();
                     break;
                 default:

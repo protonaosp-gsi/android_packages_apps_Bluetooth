@@ -41,9 +41,9 @@ final class AdapterState extends StateMachine {
 
     static final int BLE_TURN_ON = 0;
     static final int USER_TURN_ON = 1;
-    static final int BREDR_STARTED=2;
+    static final int BREDR_STARTED = 2;
     static final int ENABLED_READY = 3;
-    static final int BLE_STARTED=4;
+    static final int BLE_STARTED = 4;
 
     static final int USER_TURN_OFF = 20;
     static final int BEGIN_DISABLE = 21;
@@ -51,7 +51,7 @@ final class AdapterState extends StateMachine {
     static final int BLE_TURN_OFF = 23;
 
     static final int DISABLED = 24;
-    static final int BLE_STOPPED=25;
+    static final int BLE_STOPPED = 25;
     static final int BREDR_STOPPED = 26;
 
     static final int BREDR_START_TIMEOUT = 100;
@@ -62,7 +62,7 @@ final class AdapterState extends StateMachine {
     static final int BLE_START_TIMEOUT = 106;
     static final int BREDR_STOP_TIMEOUT = 107;
 
-    static final int USER_TURN_OFF_DELAY_MS=500;
+    static final int USER_TURN_OFF_DELAY_MS = 500;
 
     //TODO: tune me
     private static final int ENABLE_TIMEOUT_DELAY = 12000;
@@ -73,7 +73,7 @@ final class AdapterState extends StateMachine {
     private static final int BLE_STOP_TIMEOUT_DELAY = 2000;
     //BREDR_STOP_TIMEOUT can < STOP_TIMEOUT
     private static final int BREDR_STOP_TIMEOUT_DELAY = 4000;
-    private static final int PROPERTY_OP_DELAY =2000;
+    private static final int PROPERTY_OP_DELAY = 2000;
     private AdapterService mAdapterService;
     private AdapterProperties mAdapterProperties;
     private PendingCommandState mPendingCommandState = new PendingCommandState();
@@ -119,11 +119,18 @@ final class AdapterState extends StateMachine {
         quitNow();
     }
 
-    public void cleanup() {
-        if(mAdapterProperties != null)
+    private void cleanup() {
+        if (mAdapterProperties != null) {
             mAdapterProperties = null;
-        if(mAdapterService != null)
+        }
+        if (mAdapterService != null) {
             mAdapterService = null;
+        }
+    }
+
+    @Override
+    protected void onQuitting() {
+        cleanup();
     }
 
     private class OffState extends State {
@@ -142,21 +149,21 @@ final class AdapterState extends StateMachine {
 
             debugLog("Current state: OFF, message: " + msg.what);
 
-            switch(msg.what) {
-               case BLE_TURN_ON:
-                   notifyAdapterStateChange(BluetoothAdapter.STATE_BLE_TURNING_ON);
-                   mPendingCommandState.setBleTurningOn(true);
-                   transitionTo(mPendingCommandState);
-                   sendMessageDelayed(BLE_START_TIMEOUT, BLE_START_TIMEOUT_DELAY);
-                   adapterService.BleOnProcessStart();
-                   break;
+            switch (msg.what) {
+                case BLE_TURN_ON:
+                    notifyAdapterStateChange(BluetoothAdapter.STATE_BLE_TURNING_ON);
+                    mPendingCommandState.setBleTurningOn(true);
+                    transitionTo(mPendingCommandState);
+                    sendMessageDelayed(BLE_START_TIMEOUT, BLE_START_TIMEOUT_DELAY);
+                    adapterService.bleOnProcessStart();
+                    break;
 
-               case USER_TURN_OFF:
-                   //TODO: Handle case of service started and stopped without enable
-                   break;
+                case USER_TURN_OFF:
+                    //TODO: Handle case of service started and stopped without enable
+                    break;
 
-               default:
-                   return false;
+                default:
+                    return false;
             }
             return true;
         }
@@ -180,33 +187,33 @@ final class AdapterState extends StateMachine {
 
             debugLog("Current state: BLE ON, message: " + msg.what);
 
-            switch(msg.what) {
-               case USER_TURN_ON:
-                   notifyAdapterStateChange(BluetoothAdapter.STATE_TURNING_ON);
-                   mPendingCommandState.setTurningOn(true);
-                   transitionTo(mPendingCommandState);
-                   sendMessageDelayed(BREDR_START_TIMEOUT, BREDR_START_TIMEOUT_DELAY);
-                   adapterService.startCoreServices();
-                   break;
+            switch (msg.what) {
+                case USER_TURN_ON:
+                    notifyAdapterStateChange(BluetoothAdapter.STATE_TURNING_ON);
+                    mPendingCommandState.setTurningOn(true);
+                    transitionTo(mPendingCommandState);
+                    sendMessageDelayed(BREDR_START_TIMEOUT, BREDR_START_TIMEOUT_DELAY);
+                    adapterService.startCoreServices();
+                    break;
 
-               case USER_TURN_OFF:
-                   notifyAdapterStateChange(BluetoothAdapter.STATE_BLE_TURNING_OFF);
-                   mPendingCommandState.setBleTurningOff(true);
-                   adapterProperties.onBleDisable();
-                   transitionTo(mPendingCommandState);
-                   sendMessageDelayed(DISABLE_TIMEOUT, DISABLE_TIMEOUT_DELAY);
-                   boolean ret = adapterService.disableNative();
-                   if (!ret) {
+                case USER_TURN_OFF:
+                    notifyAdapterStateChange(BluetoothAdapter.STATE_BLE_TURNING_OFF);
+                    mPendingCommandState.setBleTurningOff(true);
+                    adapterProperties.onBleDisable();
+                    transitionTo(mPendingCommandState);
+                    sendMessageDelayed(DISABLE_TIMEOUT, DISABLE_TIMEOUT_DELAY);
+                    boolean ret = adapterService.disableNative();
+                    if (!ret) {
                         removeMessages(DISABLE_TIMEOUT);
                         errorLog("Error while calling disableNative");
                         //FIXME: what about post enable services
                         mPendingCommandState.setBleTurningOff(false);
                         notifyAdapterStateChange(BluetoothAdapter.STATE_BLE_ON);
-                   }
-                   break;
+                    }
+                    break;
 
-               default:
-                   return false;
+                default:
+                    return false;
             }
             return true;
         }
@@ -223,7 +230,7 @@ final class AdapterState extends StateMachine {
                 return;
             }
             adapterService.updateUuids();
-            adapterService.autoConnect();
+            adapterService.setBluetoothClassFromConfig();
         }
 
         @Override
@@ -236,24 +243,24 @@ final class AdapterState extends StateMachine {
 
             debugLog("Current state: ON, message: " + msg.what);
 
-            switch(msg.what) {
-               case BLE_TURN_OFF:
-                   notifyAdapterStateChange(BluetoothAdapter.STATE_TURNING_OFF);
-                   mPendingCommandState.setTurningOff(true);
-                   transitionTo(mPendingCommandState);
+            switch (msg.what) {
+                case BLE_TURN_OFF:
+                    notifyAdapterStateChange(BluetoothAdapter.STATE_TURNING_OFF);
+                    mPendingCommandState.setTurningOff(true);
+                    transitionTo(mPendingCommandState);
 
-                   // Invoke onBluetoothDisable which shall trigger a
-                   // setScanMode to SCAN_MODE_NONE
-                   Message m = obtainMessage(SET_SCAN_MODE_TIMEOUT);
-                   sendMessageDelayed(m, PROPERTY_OP_DELAY);
-                   adapterProperties.onBluetoothDisable();
-                   break;
+                    // Invoke onBluetoothDisable which shall trigger a
+                    // setScanMode to SCAN_MODE_NONE
+                    Message m = obtainMessage(SET_SCAN_MODE_TIMEOUT);
+                    sendMessageDelayed(m, PROPERTY_OP_DELAY);
+                    adapterProperties.onBluetoothDisable();
+                    break;
 
-               case USER_TURN_ON:
-                   break;
+                case USER_TURN_ON:
+                    break;
 
-               default:
-                   return false;
+                default:
+                    return false;
             }
             return true;
         }
@@ -265,6 +272,7 @@ final class AdapterState extends StateMachine {
         private boolean mIsBleTurningOn;
         private boolean mIsBleTurningOff;
 
+        @Override
         public void enter() {
             infoLog("Entering PendingCommandState");
         }
@@ -327,7 +335,9 @@ final class AdapterState extends StateMachine {
 
             switch (msg.what) {
                 case USER_TURN_ON:
-                    if (isBleTurningOff || isTurningOff) { //TODO:do we need to send it after ble turn off also??
+                    if (isBleTurningOff
+                            || isTurningOff) { //TODO:do we need to send it after ble turn off
+                        // also??
                         infoLog("Deferring USER_TURN_ON request...");
                         deferMessage(msg);
                     }
@@ -386,8 +396,8 @@ final class AdapterState extends StateMachine {
                     break;
 
                 case SET_SCAN_MODE_TIMEOUT:
-                     warningLog("Timeout while setting scan mode. Continuing with disable...");
-                     //Fall through
+                    warningLog("Timeout while setting scan mode. Continuing with disable...");
+                    //Fall through
                 case BEGIN_DISABLE:
                     removeMessages(SET_SCAN_MODE_TIMEOUT);
                     sendMessageDelayed(BREDR_STOP_TIMEOUT, BREDR_STOP_TIMEOUT_DELAY);
@@ -465,8 +475,9 @@ final class AdapterState extends StateMachine {
 
                 case DISABLE_TIMEOUT:
                     errorLog("Error disabling Bluetooth (disable timeout)");
-                    if (isTurningOn)
+                    if (isTurningOn) {
                         mPendingCommandState.setTurningOn(false);
+                    }
                     adapterService.stopProfileServices();
                     adapterService.stopGattProfileService();
                     mPendingCommandState.setTurningOff(false);
@@ -485,10 +496,18 @@ final class AdapterState extends StateMachine {
             StringBuilder sb = new StringBuilder();
             sb.append("PendingCommand - transient state(s):");
 
-            if (isTurningOn()) sb.append(" isTurningOn");
-            if (isTurningOff()) sb.append(" isTurningOff");
-            if (isBleTurningOn()) sb.append(" isBleTurningOn");
-            if (isBleTurningOff()) sb.append(" isBleTurningOff");
+            if (isTurningOn()) {
+                sb.append(" isTurningOn");
+            }
+            if (isTurningOff()) {
+                sb.append(" isTurningOff");
+            }
+            if (isBleTurningOn()) {
+                sb.append(" isBleTurningOn");
+            }
+            if (isBleTurningOff()) {
+                sb.append(" isBleTurningOff");
+            }
 
             verboseLog(sb.toString());
         }
@@ -522,19 +541,27 @@ final class AdapterState extends StateMachine {
     }
 
     private void infoLog(String msg) {
-        if (DBG) Log.i(TAG, msg);
+        if (DBG) {
+            Log.i(TAG, msg);
+        }
     }
 
     private void debugLog(String msg) {
-        if (DBG) Log.d(TAG, msg);
+        if (DBG) {
+            Log.d(TAG, msg);
+        }
     }
 
     private void warningLog(String msg) {
-        if (DBG) Log.w(TAG, msg);
+        if (DBG) {
+            Log.w(TAG, msg);
+        }
     }
 
     private void verboseLog(String msg) {
-        if (VDBG) Log.v(TAG, msg);
+        if (VDBG) {
+            Log.v(TAG, msg);
+        }
     }
 
     private void errorLog(String msg) {

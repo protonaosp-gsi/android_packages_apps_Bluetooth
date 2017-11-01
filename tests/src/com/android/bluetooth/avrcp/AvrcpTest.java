@@ -1,38 +1,47 @@
 package com.android.bluetooth.avrcp;
 
-import android.bluetooth.BluetoothAvrcp;
+import static org.mockito.Mockito.*;
+
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.content.pm.ServiceInfo;
-import android.media.session.MediaSession;
-import android.media.session.MediaSession.QueueItem;
-import android.media.MediaDescription;
-import android.media.MediaMetadata;
 import android.media.AudioManager;
-import android.media.session.MediaSessionManager;
-import android.os.Bundle;
-import android.test.AndroidTestCase;
-import android.util.Log;
+import android.os.Looper;
+import android.support.test.InstrumentationRegistry;
+import android.support.test.filters.MediumTest;
+import android.support.test.runner.AndroidJUnit4;
 
-import java.nio.ByteBuffer;
-import java.util.List;
-import java.util.Arrays;
+import org.junit.Assert;
+import org.junit.Test;
+import org.junit.runner.RunWith;
+
 import java.util.ArrayList;
+import java.util.List;
 
-import static org.mockito.Mockito.isA;
-import static org.mockito.Mockito.anyInt;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 
-public class AvrcpTest extends AndroidTestCase {
-
+/**
+ * Unit tests for {@link Avrcp}
+ */
+@MediumTest
+@RunWith(AndroidJUnit4.class)
+public class AvrcpTest {
+    @Test
     public void testCanStart() {
-        Avrcp a = Avrcp.make(getContext());
+        if (Looper.myLooper() == null) {
+            Looper.prepare();
+        }
+
+        Avrcp a = Avrcp.make(InstrumentationRegistry.getTargetContext());
     }
 
+    @Test
     public void testFailedBrowseStart() {
+        if (Looper.myLooper() == null) {
+            Looper.prepare();
+        }
+
         Context mockContext = mock(Context.class);
         AudioManager mockAudioManager = mock(AudioManager.class);
         PackageManager mockPackageManager = mock(PackageManager.class);
@@ -57,7 +66,8 @@ public class AvrcpTest extends AndroidTestCase {
         fakePackage.serviceInfo = fakeService;
         fakePackage.nonLocalizedLabel = "Fake Package";
         resInfos.add(fakePackage);
-        when(mockPackageManager.queryIntentServices(isA(Intent.class), anyInt())).thenReturn(resInfos);
+        when(mockPackageManager.queryIntentServices(isA(Intent.class), anyInt())).thenReturn(
+                resInfos);
 
         when(mockContext.startService(isA(Intent.class))).thenThrow(new SecurityException("test"));
 
@@ -66,7 +76,8 @@ public class AvrcpTest extends AndroidTestCase {
         try {
             Avrcp a = Avrcp.make(mockContext);
         } catch (SecurityException e) {
-            fail("Threw SecurityException instead of protecting against it: " + e.toString());
+            Assert.fail(
+                    "Threw SecurityException instead of protecting against it: " + e.toString());
         }
     }
 }
