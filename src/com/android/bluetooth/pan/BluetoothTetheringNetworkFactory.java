@@ -19,7 +19,6 @@ package com.android.bluetooth.pan;
 import android.bluetooth.BluetoothDevice;
 import android.content.Context;
 import android.net.ConnectivityManager;
-import android.net.DhcpResults;
 import android.net.LinkProperties;
 import android.net.NetworkAgent;
 import android.net.NetworkCapabilities;
@@ -31,9 +30,6 @@ import android.net.ip.IpManager.WaitForProvisioningCallback;
 import android.os.Looper;
 import android.text.TextUtils;
 import android.util.Slog;
-
-import com.android.bluetooth.pan.PanService;
-import com.android.internal.util.AsyncChannel;
 
 /**
  * This class tracks the data connection associated with Bluetooth
@@ -85,6 +81,7 @@ public class BluetoothTetheringNetworkFactory extends NetworkFactory {
         // of IpManager. This will likely necessitate a rethink about
         // NetworkAgent, NetworkInfo, and associated instance lifetimes.
         Thread ipProvisioningThread = new Thread(new Runnable() {
+            @Override
             public void run() {
                 LinkProperties linkProperties;
                 final WaitForProvisioningCallback ipmCallback = new WaitForProvisioningCallback() {
@@ -103,37 +100,40 @@ public class BluetoothTetheringNetworkFactory extends NetworkFactory {
                         Slog.e(TAG, "attempted to reverse tether without interface name");
                         return;
                     }
-                    log("ipProvisioningThread(+" + mInterfaceName + "): " +
-                            "mNetworkInfo=" + mNetworkInfo);
+                    log("ipProvisioningThread(+" + mInterfaceName + "): " + "mNetworkInfo="
+                            + mNetworkInfo);
                     mIpManager = new IpManager(mContext, mInterfaceName, ipmCallback);
-                    mIpManager.startProvisioning(
-                            mIpManager.buildProvisioningConfiguration()
-                                    .withoutIpReachabilityMonitor()
-                                    .build());
+                    mIpManager.startProvisioning(mIpManager.buildProvisioningConfiguration()
+                            .withoutIpReachabilityMonitor()
+                            .build());
                     mNetworkInfo.setDetailedState(DetailedState.OBTAINING_IPADDR, null, null);
                 }
 
                 linkProperties = ipmCallback.waitForProvisioning();
                 if (linkProperties == null) {
                     Slog.e(TAG, "IP provisioning error.");
-                    synchronized(BluetoothTetheringNetworkFactory.this) {
+                    synchronized (BluetoothTetheringNetworkFactory.this) {
                         stopIpManagerLocked();
                         setScoreFilter(-1);
                     }
                     return;
                 }
 
-                synchronized(BluetoothTetheringNetworkFactory.this) {
+                synchronized (BluetoothTetheringNetworkFactory.this) {
                     mNetworkInfo.setIsAvailable(true);
                     mNetworkInfo.setDetailedState(DetailedState.CONNECTED, null, null);
 
                     // Create our NetworkAgent.
-                    mNetworkAgent = new NetworkAgent(getLooper(), mContext, NETWORK_TYPE,
-                            mNetworkInfo, mNetworkCapabilities, linkProperties, NETWORK_SCORE) {
-                        public void unwanted() {
-                            BluetoothTetheringNetworkFactory.this.onCancelRequest();
-                        };
-                    };
+                    mNetworkAgent =
+                            new NetworkAgent(getLooper(), mContext, NETWORK_TYPE, mNetworkInfo,
+                                    mNetworkCapabilities, linkProperties, NETWORK_SCORE) {
+                                @Override
+                                public void unwanted() {
+                                    BluetoothTetheringNetworkFactory.this.onCancelRequest();
+                                }
+
+                                ;
+                            };
                 }
             }
         });
@@ -158,7 +158,7 @@ public class BluetoothTetheringNetworkFactory extends NetworkFactory {
             mNetworkAgent = null;
         }
         for (BluetoothDevice device : mPanService.getConnectedDevices()) {
-             mPanService.disconnect(device);
+            mPanService.disconnect(device);
         }
     }
 
@@ -169,7 +169,7 @@ public class BluetoothTetheringNetworkFactory extends NetworkFactory {
             Slog.e(TAG, "attempted to reverse tether with empty interface");
             return;
         }
-        synchronized(this) {
+        synchronized (this) {
             if (!TextUtils.isEmpty(mInterfaceName)) {
                 Slog.e(TAG, "attempted to reverse tether while already in process");
                 return;

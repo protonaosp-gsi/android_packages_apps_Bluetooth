@@ -32,14 +32,10 @@
 
 package com.android.bluetooth.opp;
 
-import com.android.bluetooth.R;
-
 import android.app.NotificationManager;
-import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothDevicePicker;
 import android.content.BroadcastReceiver;
-import android.content.ContentUris;
 import android.content.ContentValues;
 import android.content.Context;
 import android.content.Intent;
@@ -47,6 +43,8 @@ import android.database.Cursor;
 import android.net.Uri;
 import android.util.Log;
 import android.widget.Toast;
+
+import com.android.bluetooth.R;
 
 /**
  * Receives and handles: system broadcasts; Intents from other applications;
@@ -61,41 +59,19 @@ public class BluetoothOppReceiver extends BroadcastReceiver {
     public void onReceive(Context context, Intent intent) {
         String action = intent.getAction();
 
-
-        if (action.equals(BluetoothAdapter.ACTION_STATE_CHANGED)) {
-            if (BluetoothAdapter.STATE_ON == intent.getIntExtra(
-                    BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)) {
-                if (V) Log.v(TAG, "Received BLUETOOTH_STATE_CHANGED_ACTION, BLUETOOTH_STATE_ON");
-                context.startService(new Intent(context, BluetoothOppService.class));
-
-                // If this is within a sending process, continue the handle
-                // logic to display device picker dialog.
-                synchronized (this) {
-                    if (BluetoothOppManager.getInstance(context).mSendingFlag) {
-                        // reset the flags
-                        BluetoothOppManager.getInstance(context).mSendingFlag = false;
-
-                        Intent in1 = new Intent(BluetoothDevicePicker.ACTION_LAUNCH);
-                        in1.putExtra(BluetoothDevicePicker.EXTRA_NEED_AUTH, false);
-                        in1.putExtra(BluetoothDevicePicker.EXTRA_FILTER_TYPE,
-                                BluetoothDevicePicker.FILTER_TYPE_TRANSFER);
-                        in1.putExtra(BluetoothDevicePicker.EXTRA_LAUNCH_PACKAGE,
-                                Constants.THIS_PACKAGE_NAME);
-                        in1.putExtra(BluetoothDevicePicker.EXTRA_LAUNCH_CLASS,
-                                BluetoothOppReceiver.class.getName());
-
-                        in1.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                        context.startActivity(in1);
-                    }
-                }
-            }
-        } else if (action.equals(BluetoothDevicePicker.ACTION_DEVICE_SELECTED)) {
+        if (action.equals(BluetoothDevicePicker.ACTION_DEVICE_SELECTED)) {
             BluetoothOppManager mOppManager = BluetoothOppManager.getInstance(context);
 
             BluetoothDevice remoteDevice = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
 
-            if (V) Log.v(TAG, "Received BT device selected intent, bt device: " + remoteDevice);
+            if (D) {
+                Log.d(TAG, "Received BT device selected intent, bt device: " + remoteDevice);
+            }
 
+            if (remoteDevice == null) {
+                mOppManager.cleanUpSendingFileInfo();
+                return;
+            }
             // Insert transfer session record to database
             mOppManager.startTransfer(remoteDevice);
 
@@ -111,33 +87,37 @@ public class BluetoothOppReceiver extends BroadcastReceiver {
             }
             Toast.makeText(context, toastMsg, Toast.LENGTH_SHORT).show();
         } else if (action.equals(Constants.ACTION_INCOMING_FILE_CONFIRM)) {
-            if (V) Log.v(TAG, "Receiver ACTION_INCOMING_FILE_CONFIRM");
+            if (V) {
+                Log.v(TAG, "Receiver ACTION_INCOMING_FILE_CONFIRM");
+            }
 
             Uri uri = intent.getData();
             Intent in = new Intent(context, BluetoothOppIncomingFileConfirmActivity.class);
             in.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             in.setDataAndNormalize(uri);
             context.startActivity(in);
-            cancelNotification(context, uri);
 
         } else if (action.equals(Constants.ACTION_DECLINE)) {
-            if (V) Log.v(TAG, "Receiver ACTION_DECLINE");
+            if (V) {
+                Log.v(TAG, "Receiver ACTION_DECLINE");
+            }
 
             Uri uri = intent.getData();
             ContentValues values = new ContentValues();
             values.put(BluetoothShare.USER_CONFIRMATION, BluetoothShare.USER_CONFIRMATION_DENIED);
             context.getContentResolver().update(uri, values, null, null);
-            cancelNotification(context, uri);
+            cancelNotification(context, BluetoothOppNotification.NOTIFICATION_ID_PROGRESS);
 
         } else if (action.equals(Constants.ACTION_ACCEPT)) {
-            if (V) Log.v(TAG, "Receiver ACTION_ACCEPT");
+            if (V) {
+                Log.v(TAG, "Receiver ACTION_ACCEPT");
+            }
 
             Uri uri = intent.getData();
             ContentValues values = new ContentValues();
-            values.put(BluetoothShare.USER_CONFIRMATION, BluetoothShare.USER_CONFIRMATION_CONFIRMED);
+            values.put(BluetoothShare.USER_CONFIRMATION,
+                    BluetoothShare.USER_CONFIRMATION_CONFIRMED);
             context.getContentResolver().update(uri, values, null, null);
-            cancelNotification(context, uri);
-
         } else if (action.equals(Constants.ACTION_OPEN) || action.equals(Constants.ACTION_LIST)) {
             if (V) {
                 if (action.equals(Constants.ACTION_OPEN)) {
@@ -168,23 +148,28 @@ public class BluetoothOppReceiver extends BroadcastReceiver {
                 context.startActivity(in);
             }
 
-            cancelNotification(context, uri);
         } else if (action.equals(Constants.ACTION_OPEN_OUTBOUND_TRANSFER)) {
-            if (V) Log.v(TAG, "Received ACTION_OPEN_OUTBOUND_TRANSFER.");
+            if (V) {
+                Log.v(TAG, "Received ACTION_OPEN_OUTBOUND_TRANSFER.");
+            }
 
             Intent in = new Intent(context, BluetoothOppTransferHistory.class);
             in.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
             in.putExtra("direction", BluetoothShare.DIRECTION_OUTBOUND);
             context.startActivity(in);
         } else if (action.equals(Constants.ACTION_OPEN_INBOUND_TRANSFER)) {
-            if (V) Log.v(TAG, "Received ACTION_OPEN_INBOUND_TRANSFER.");
+            if (V) {
+                Log.v(TAG, "Received ACTION_OPEN_INBOUND_TRANSFER.");
+            }
 
             Intent in = new Intent(context, BluetoothOppTransferHistory.class);
             in.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
             in.putExtra("direction", BluetoothShare.DIRECTION_INBOUND);
             context.startActivity(in);
         } else if (action.equals(Constants.ACTION_OPEN_RECEIVED_FILES)) {
-            if (V) Log.v(TAG, "Received ACTION_OPEN_RECEIVED_FILES.");
+            if (V) {
+                Log.v(TAG, "Received ACTION_OPEN_RECEIVED_FILES.");
+            }
 
             Intent in = new Intent(context, BluetoothOppTransferHistory.class);
             in.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
@@ -192,36 +177,43 @@ public class BluetoothOppReceiver extends BroadcastReceiver {
             in.putExtra(Constants.EXTRA_SHOW_ALL_FILES, true);
             context.startActivity(in);
         } else if (action.equals(Constants.ACTION_HIDE)) {
-            if (V) Log.v(TAG, "Receiver hide for " + intent.getData());
-            Cursor cursor = context.getContentResolver().query(intent.getData(), null, null, null,
-                    null);
+            if (V) {
+                Log.v(TAG, "Receiver hide for " + intent.getData());
+            }
+            Cursor cursor =
+                    context.getContentResolver().query(intent.getData(), null, null, null, null);
             if (cursor != null) {
                 if (cursor.moveToFirst()) {
-                    int statusColumn = cursor.getColumnIndexOrThrow(BluetoothShare.STATUS);
-                    int status = cursor.getInt(statusColumn);
                     int visibilityColumn = cursor.getColumnIndexOrThrow(BluetoothShare.VISIBILITY);
                     int visibility = cursor.getInt(visibilityColumn);
-                    int userConfirmationColumn = cursor
-                            .getColumnIndexOrThrow(BluetoothShare.USER_CONFIRMATION);
+                    int userConfirmationColumn =
+                            cursor.getColumnIndexOrThrow(BluetoothShare.USER_CONFIRMATION);
                     int userConfirmation = cursor.getInt(userConfirmationColumn);
                     if (((userConfirmation == BluetoothShare.USER_CONFIRMATION_PENDING))
                             && visibility == BluetoothShare.VISIBILITY_VISIBLE) {
                         ContentValues values = new ContentValues();
                         values.put(BluetoothShare.VISIBILITY, BluetoothShare.VISIBILITY_HIDDEN);
                         context.getContentResolver().update(intent.getData(), values, null, null);
-                        if (V) Log.v(TAG, "Action_hide received and db updated");
+                        if (V) {
+                            Log.v(TAG, "Action_hide received and db updated");
                         }
+                    }
                 }
                 cursor.close();
             }
         } else if (action.equals(Constants.ACTION_COMPLETE_HIDE)) {
-            if (V) Log.v(TAG, "Receiver ACTION_COMPLETE_HIDE");
+            if (V) {
+                Log.v(TAG, "Receiver ACTION_COMPLETE_HIDE");
+            }
             ContentValues updateValues = new ContentValues();
             updateValues.put(BluetoothShare.VISIBILITY, BluetoothShare.VISIBILITY_HIDDEN);
-            context.getContentResolver().update(BluetoothShare.CONTENT_URI, updateValues,
-                    BluetoothOppNotification.WHERE_COMPLETED, null);
+            context.getContentResolver()
+                    .update(BluetoothShare.CONTENT_URI, updateValues,
+                            BluetoothOppNotification.WHERE_COMPLETED, null);
         } else if (action.equals(BluetoothShare.TRANSFER_COMPLETED_ACTION)) {
-            if (V) Log.v(TAG, "Receiver Transfer Complete Intent for " + intent.getData());
+            if (V) {
+                Log.v(TAG, "Receiver Transfer Complete Intent for " + intent.getData());
+            }
 
             String toastMsg = null;
             BluetoothOppTransferInfo transInfo = new BluetoothOppTransferInfo();
@@ -263,39 +255,36 @@ public class BluetoothOppReceiver extends BroadcastReceiver {
                 if (transInfo.mDirection == BluetoothShare.DIRECTION_OUTBOUND) {
                     toastMsg = context.getString(R.string.notification_sent, transInfo.mFileName);
                 } else if (transInfo.mDirection == BluetoothShare.DIRECTION_INBOUND) {
-                    toastMsg = context.getString(R.string.notification_received,
-                            transInfo.mFileName);
+                    toastMsg =
+                            context.getString(R.string.notification_received, transInfo.mFileName);
                 }
 
             } else if (BluetoothShare.isStatusError(transInfo.mStatus)) {
                 if (transInfo.mDirection == BluetoothShare.DIRECTION_OUTBOUND) {
-                    toastMsg = context.getString(R.string.notification_sent_fail,
-                            transInfo.mFileName);
+                    toastMsg =
+                            context.getString(R.string.notification_sent_fail, transInfo.mFileName);
                 } else if (transInfo.mDirection == BluetoothShare.DIRECTION_INBOUND) {
                     toastMsg = context.getString(R.string.download_fail_line1);
                 }
             }
-            if (V) Log.v(TAG, "Toast msg == " + toastMsg);
+            if (V) {
+                Log.v(TAG, "Toast msg == " + toastMsg);
+            }
             if (toastMsg != null) {
                 Toast.makeText(context, toastMsg, Toast.LENGTH_SHORT).show();
             }
         }
     }
 
-    private void cancelNotification(Context context, Uri uri) {
-        NotificationManager notMgr = (NotificationManager)context
-                .getSystemService(Context.NOTIFICATION_SERVICE);
-        if (notMgr == null) return;
-
-        int id = -1;
-        try {
-          id = (int) ContentUris.parseId(uri);
-        } catch (NumberFormatException ex) {
-          Log.v(TAG, "Can't parse notification ID from Uri!");
-          return;
+    private void cancelNotification(Context context, int id) {
+        NotificationManager notMgr =
+                (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
+        if (notMgr == null) {
+            return;
         }
-
         notMgr.cancel(id);
-        if (V) Log.v(TAG, "notMgr.cancel called");
+        if (V) {
+            Log.v(TAG, "notMgr.cancel called");
+        }
     }
 }

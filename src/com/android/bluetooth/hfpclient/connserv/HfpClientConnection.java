@@ -18,7 +18,6 @@ package com.android.bluetooth.hfpclient.connserv;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothHeadsetClient;
 import android.bluetooth.BluetoothHeadsetClientCall;
-import android.bluetooth.BluetoothProfile;
 import android.content.Context;
 import android.net.Uri;
 import android.telecom.Connection;
@@ -38,6 +37,7 @@ public class HfpClientConnection extends Connection {
     private BluetoothHeadsetClient mHeadsetProfile;
 
     private BluetoothHeadsetClientCall mCurrentCall;
+    private int mPreviousCallState = -1;
     private boolean mClosed;
     private boolean mClosing = false;
     private boolean mLocalDisconnect;
@@ -73,14 +73,14 @@ public class HfpClientConnection extends Connection {
             throw new IllegalStateException("HeadsetProfile is null, returning");
         }
 
-        mCurrentCall = mHeadsetProfile.dial(
-            mDevice, number.getSchemeSpecificPart());
+        mCurrentCall = mHeadsetProfile.dial(mDevice, number.getSchemeSpecificPart());
         if (mCurrentCall == null) {
             close(DisconnectCause.ERROR);
             Log.e(TAG, "Failed to create the call, dial failed.");
             return;
         }
 
+        mHeadsetProfile.connectAudio(device);
         setInitializing();
         setDialing();
         finishInitializing();
@@ -91,9 +91,11 @@ public class HfpClientConnection extends Connection {
         setAudioModeIsVoip(false);
         Uri number = Uri.fromParts(PhoneAccount.SCHEME_TEL, mCurrentCall.getNumber(), null);
         setAddress(number, TelecomManager.PRESENTATION_ALLOWED);
-        setConnectionCapabilities(CAPABILITY_SUPPORT_HOLD | CAPABILITY_MUTE |
-                CAPABILITY_SEPARATE_FROM_CONFERENCE | CAPABILITY_DISCONNECT_FROM_CONFERENCE |
-                (getState() == STATE_ACTIVE || getState() == STATE_HOLDING ? CAPABILITY_HOLD : 0));
+        setConnectionCapabilities(
+                CAPABILITY_SUPPORT_HOLD | CAPABILITY_MUTE | CAPABILITY_SEPARATE_FROM_CONFERENCE
+                        | CAPABILITY_DISCONNECT_FROM_CONFERENCE | (
+                        getState() == STATE_ACTIVE || getState() == STATE_HOLDING ? CAPABILITY_HOLD
+                                : 0));
     }
 
     public UUID getUUID() {
@@ -114,8 +116,8 @@ public class HfpClientConnection extends Connection {
     }
 
     public boolean inConference() {
-        return mAdded && mCurrentCall != null && mCurrentCall.isMultiParty() &&
-                getState() != Connection.STATE_DISCONNECTED;
+        return mAdded && mCurrentCall != null && mCurrentCall.isMultiParty()
+                && getState() != Connection.STATE_DISCONNECTED;
     }
 
     public void enterPrivateMode() {
@@ -161,12 +163,19 @@ public class HfpClientConnection extends Connection {
                 setRinging();
                 break;
             case BluetoothHeadsetClientCall.CALL_STATE_TERMINATED:
-                // TODO Use more specific causes
-                close(mLocalDisconnect ? DisconnectCause.LOCAL : DisconnectCause.REMOTE);
+                if (mPreviousCallState == BluetoothHeadsetClientCall.CALL_STATE_INCOMING
+                        || mPreviousCallState == BluetoothHeadsetClientCall.CALL_STATE_WAITING) {
+                    close(DisconnectCause.MISSED);
+                } else if (mLocalDisconnect) {
+                    close(DisconnectCause.LOCAL);
+                } else {
+                    close(DisconnectCause.REMOTE);
+                }
                 break;
             default:
                 Log.wtf(TAG, "Unexpected phone state " + state);
         }
+        mPreviousCallState = state;
     }
 
     public synchronized void close(int cause) {
@@ -187,6 +196,10 @@ public class HfpClientConnection extends Connection {
 
     public synchronized boolean isClosing() {
         return mClosing;
+    }
+
+    public synchronized BluetoothDevice getDevice() {
+        return mDevice;
     }
 
     @Override
@@ -252,6 +265,7 @@ public class HfpClientConnection extends Connection {
         if (!mClosed) {
             mHeadsetProfile.acceptCall(mDevice, BluetoothHeadsetClient.CALL_ACCEPT_NONE);
         }
+        mHeadsetProfile.connectAudio(mDevice);
     }
 
     @Override
@@ -275,7 +289,7 @@ public class HfpClientConnection extends Connection {
 
     @Override
     public String toString() {
-        return "HfpClientConnection{" + getAddress() + "," + stateToString(getState()) + "," +
-                mCurrentCall + "}";
+        return "HfpClientConnection{" + getAddress() + "," + stateToString(getState()) + ","
+                + mCurrentCall + "}";
     }
 }

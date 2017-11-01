@@ -25,10 +25,9 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.media.AudioManager;
-import android.media.browse.MediaBrowser;
-import android.media.browse.MediaBrowser.MediaItem;
 import android.media.MediaDescription;
 import android.media.MediaMetadata;
+import android.media.browse.MediaBrowser.MediaItem;
 import android.media.session.PlaybackState;
 import android.os.Bundle;
 import android.os.Message;
@@ -39,11 +38,9 @@ import com.android.bluetooth.a2dpsink.A2dpSinkService;
 import com.android.bluetooth.btservice.ProfileService;
 import com.android.internal.util.State;
 import com.android.internal.util.StateMachine;
+
 import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.LinkedList;
 import java.util.List;
-import java.util.Queue;
 
 /**
  * Provides Bluetooth AVRCP Controller State Machine responsible for all remote control connections
@@ -122,8 +119,8 @@ class AvrcpControllerStateMachine extends StateMachine {
     private final MoveToRoot mMoveToRoot;
 
     private final Object mLock = new Object();
-    private static final ArrayList<MediaItem> mEmptyMediaItemList = new ArrayList<>();
-    private static final MediaMetadata mEmptyMMD = new MediaMetadata.Builder().build();
+    private static final ArrayList<MediaItem> EMPTY_MEDIA_ITEM_LIST = new ArrayList<>();
+    private static final MediaMetadata EMPTY_MEDIA_METADATA = new MediaMetadata.Builder().build();
 
     // APIs exist to access these so they must be thread safe
     private Boolean mIsConnected = false;
@@ -133,7 +130,7 @@ class AvrcpControllerStateMachine extends StateMachine {
     // Only accessed from State Machine processMessage
     private boolean mAbsoluteVolumeChangeInProgress = false;
     private boolean mBroadcastMetadata = false;
-    private int previousPercentageVol = -1;
+    private int mPreviousPercentageVol = -1;
 
     // Depth from root of current browsing. This can be used to move to root directly.
     private int mBrowseDepth = 0;
@@ -188,24 +185,25 @@ class AvrcpControllerStateMachine extends StateMachine {
                         mBrowseTree.init();
                         transitionTo(mConnected);
                         BluetoothDevice rtDevice = (BluetoothDevice) msg.obj;
-                        synchronized(mLock) {
+                        synchronized (mLock) {
                             mRemoteDevice = new RemoteDevice(rtDevice);
                             mAddressedPlayer = new AvrcpPlayer();
                             mIsConnected = true;
                         }
                         Intent intent = new Intent(
-                            BluetoothAvrcpController.ACTION_CONNECTION_STATE_CHANGED);
+                                BluetoothAvrcpController.ACTION_CONNECTION_STATE_CHANGED);
                         intent.putExtra(BluetoothProfile.EXTRA_PREVIOUS_STATE,
-                            BluetoothProfile.STATE_DISCONNECTED);
+                                BluetoothProfile.STATE_DISCONNECTED);
                         intent.putExtra(BluetoothProfile.EXTRA_STATE,
-                            BluetoothProfile.STATE_CONNECTED);
+                                BluetoothProfile.STATE_CONNECTED);
                         intent.putExtra(BluetoothDevice.EXTRA_DEVICE, rtDevice);
                         mContext.sendBroadcast(intent, ProfileService.BLUETOOTH_PERM);
                     }
                     break;
 
                 default:
-                    Log.w(TAG,"Currently Disconnected not handling " + dumpMessageString(msg.what));
+                    Log.w(TAG,
+                            "Currently Disconnected not handling " + dumpMessageString(msg.what));
                     return false;
             }
             return true;
@@ -221,9 +219,9 @@ class AvrcpControllerStateMachine extends StateMachine {
                 switch (msg.what) {
                     case MESSAGE_STOP_METADATA_BROADCASTS:
                         mBroadcastMetadata = false;
-                        broadcastPlayBackStateChanged(new PlaybackState.Builder().setState(
-                            PlaybackState.STATE_PAUSED, mAddressedPlayer.getPlayTime(),
-                            0).build());
+                        broadcastPlayBackStateChanged(
+                                new PlaybackState.Builder().setState(PlaybackState.STATE_PAUSED,
+                                        mAddressedPlayer.getPlayTime(), 0).build());
                         break;
 
                     case MESSAGE_START_METADATA_BROADCASTS:
@@ -231,15 +229,14 @@ class AvrcpControllerStateMachine extends StateMachine {
                         broadcastPlayBackStateChanged(mAddressedPlayer.getPlaybackState());
                         if (mAddressedPlayer.getCurrentTrack() != null) {
                             broadcastMetaDataChanged(
-                                mAddressedPlayer.getCurrentTrack().getMediaMetaData());
+                                    mAddressedPlayer.getCurrentTrack().getMediaMetaData());
                         }
                         break;
 
                     case MESSAGE_SEND_PASS_THROUGH_CMD:
                         BluetoothDevice device = (BluetoothDevice) msg.obj;
-                        AvrcpControllerService
-                            .sendPassThroughCommandNative(Utils.getByteAddress(device), msg.arg1,
-                                msg.arg2);
+                        AvrcpControllerService.sendPassThroughCommandNative(
+                                Utils.getByteAddress(device), msg.arg1, msg.arg2);
                         if (a2dpSinkService != null) {
                             Log.d(TAG, " inform AVRCP Commands to A2DP Sink ");
                             a2dpSinkService.informAvrcpPassThroughCmd(device, msg.arg1, msg.arg2);
@@ -248,7 +245,7 @@ class AvrcpControllerStateMachine extends StateMachine {
 
                     case MESSAGE_SEND_GROUP_NAVIGATION_CMD:
                         AvrcpControllerService.sendGroupNavigationCommandNative(
-                            mRemoteDevice.getBluetoothAddress(), msg.arg1, msg.arg2);
+                                mRemoteDevice.getBluetoothAddress(), msg.arg1, msg.arg2);
                         break;
 
                     case MESSAGE_GET_NOW_PLAYING_LIST:
@@ -269,8 +266,8 @@ class AvrcpControllerStateMachine extends StateMachine {
 
                     case MESSAGE_GET_PLAYER_LIST:
                         AvrcpControllerService.getPlayerListNative(
-                            mRemoteDevice.getBluetoothAddress(), (byte) msg.arg1,
-                            (byte) msg.arg2);
+                                mRemoteDevice.getBluetoothAddress(), (byte) msg.arg1,
+                                (byte) msg.arg2);
                         transitionTo(mGetPlayerListing);
                         sendMessageDelayed(MESSAGE_INTERNAL_CMD_TIMEOUT, CMD_TIMEOUT_MILLIS);
                         break;
@@ -284,8 +281,8 @@ class AvrcpControllerStateMachine extends StateMachine {
                         // String is encoded as a Hex String (mostly for display purposes)
                         // hence convert this back to real byte string.
                         AvrcpControllerService.changeFolderPathNative(
-                            mRemoteDevice.getBluetoothAddress(), (byte) msg.arg1,
-                            AvrcpControllerService.hexStringToByteUID(uid));
+                                mRemoteDevice.getBluetoothAddress(), (byte) msg.arg1,
+                                AvrcpControllerService.hexStringToByteUID(uid));
                         mChangeFolderPath.setFolder(fid);
                         transitionTo(mChangeFolderPath);
                         sendMessage(MESSAGE_INTERNAL_BROWSE_DEPTH_INCREMENT, (byte) msg.arg1);
@@ -296,13 +293,12 @@ class AvrcpControllerStateMachine extends StateMachine {
                     case MESSAGE_FETCH_ATTR_AND_PLAY_ITEM: {
                         int scope = msg.arg1;
                         String playItemUid = (String) msg.obj;
-                        BrowseTree.BrowseNode currBrPlayer =
-                            mBrowseTree.getCurrentBrowsedPlayer();
+                        BrowseTree.BrowseNode currBrPlayer = mBrowseTree.getCurrentBrowsedPlayer();
                         BrowseTree.BrowseNode currAddrPlayer =
-                            mBrowseTree.getCurrentAddressedPlayer();
+                                mBrowseTree.getCurrentAddressedPlayer();
                         if (DBG) {
-                            Log.d(TAG, "currBrPlayer " + currBrPlayer +
-                                " currAddrPlayer " + currAddrPlayer);
+                            Log.d(TAG, "currBrPlayer " + currBrPlayer + " currAddrPlayer "
+                                    + currAddrPlayer);
                         }
 
                         if (currBrPlayer == null || currBrPlayer.equals(currAddrPlayer)) {
@@ -311,15 +307,16 @@ class AvrcpControllerStateMachine extends StateMachine {
                             // NOTE: It may be possible that sending play while the same item is
                             // playing leads to reset of track.
                             AvrcpControllerService.playItemNative(
-                                mRemoteDevice.getBluetoothAddress(), (byte) scope,
-                                AvrcpControllerService.hexStringToByteUID(playItemUid), (int) 0);
+                                    mRemoteDevice.getBluetoothAddress(), (byte) scope,
+                                    AvrcpControllerService.hexStringToByteUID(playItemUid),
+                                    (int) 0);
                         } else {
                             // Send out the request for setting addressed player.
                             AvrcpControllerService.setAddressedPlayerNative(
-                                mRemoteDevice.getBluetoothAddress(),
-                                currBrPlayer.getPlayerID());
-                            mSetAddrPlayer.setItemAndScope(
-                                currBrPlayer.getID(), playItemUid, scope);
+                                    mRemoteDevice.getBluetoothAddress(),
+                                    currBrPlayer.getPlayerID());
+                            mSetAddrPlayer.setItemAndScope(currBrPlayer.getID(), playItemUid,
+                                    scope);
                             transitionTo(mSetAddrPlayer);
                         }
                         break;
@@ -327,7 +324,7 @@ class AvrcpControllerStateMachine extends StateMachine {
 
                     case MESSAGE_SET_BROWSED_PLAYER: {
                         AvrcpControllerService.setBrowsedPlayerNative(
-                            mRemoteDevice.getBluetoothAddress(), (int) msg.arg1);
+                                mRemoteDevice.getBluetoothAddress(), (int) msg.arg1);
                         mSetBrowsedPlayer.setFolder((String) msg.obj);
                         transitionTo(mSetBrowsedPlayer);
                         break;
@@ -343,11 +340,11 @@ class AvrcpControllerStateMachine extends StateMachine {
                             transitionTo(mDisconnected);
                             BluetoothDevice rtDevice = (BluetoothDevice) msg.obj;
                             Intent intent = new Intent(
-                                BluetoothAvrcpController.ACTION_CONNECTION_STATE_CHANGED);
+                                    BluetoothAvrcpController.ACTION_CONNECTION_STATE_CHANGED);
                             intent.putExtra(BluetoothProfile.EXTRA_PREVIOUS_STATE,
-                                BluetoothProfile.STATE_CONNECTED);
+                                    BluetoothProfile.STATE_CONNECTED);
                             intent.putExtra(BluetoothProfile.EXTRA_STATE,
-                                BluetoothProfile.STATE_DISCONNECTED);
+                                    BluetoothProfile.STATE_DISCONNECTED);
                             intent.putExtra(BluetoothDevice.EXTRA_DEVICE, rtDevice);
                             mContext.sendBroadcast(intent, ProfileService.BLUETOOTH_PERM);
                         }
@@ -359,17 +356,17 @@ class AvrcpControllerStateMachine extends StateMachine {
                         // the connection state handling should be done via the message
                         // MESSAGE_PROCESS_CONNECTION_CHANGE.
                         Intent intent = new Intent(
-                            AvrcpControllerService.ACTION_BROWSE_CONNECTION_STATE_CHANGED);
+                                AvrcpControllerService.ACTION_BROWSE_CONNECTION_STATE_CHANGED);
                         intent.putExtra(BluetoothDevice.EXTRA_DEVICE, (BluetoothDevice) msg.obj);
                         if (DBG) {
                             Log.d(TAG, "Browse connection state " + msg.arg1);
                         }
                         if (msg.arg1 == 1) {
-                            intent.putExtra(
-                                BluetoothProfile.EXTRA_STATE, BluetoothProfile.STATE_CONNECTED);
+                            intent.putExtra(BluetoothProfile.EXTRA_STATE,
+                                    BluetoothProfile.STATE_CONNECTED);
                         } else if (msg.arg1 == 0) {
-                            intent.putExtra(
-                                BluetoothProfile.EXTRA_STATE, BluetoothProfile.STATE_DISCONNECTED);
+                            intent.putExtra(BluetoothProfile.EXTRA_STATE,
+                                    BluetoothProfile.STATE_DISCONNECTED);
                             // If browse is disconnected, the next time we connect we should
                             // be at the ROOT.
                             mBrowseDepth = 0;
@@ -393,13 +390,11 @@ class AvrcpControllerStateMachine extends StateMachine {
                         mRemoteDevice.setNotificationLabel(msg.arg1);
                         mRemoteDevice.setAbsVolNotificationRequested(true);
                         int percentageVol = getVolumePercentage();
-                        Log.d(TAG,
-                            " Sending Interim Response = " + percentageVol + " label " + msg.arg1);
-                        AvrcpControllerService
-                            .sendRegisterAbsVolRspNative(mRemoteDevice.getBluetoothAddress(),
-                                NOTIFICATION_RSP_TYPE_INTERIM,
-                                percentageVol,
-                                mRemoteDevice.getNotificationLabel());
+                        Log.d(TAG, " Sending Interim Response = " + percentageVol + " label "
+                                + msg.arg1);
+                        AvrcpControllerService.sendRegisterAbsVolRspNative(
+                                mRemoteDevice.getBluetoothAddress(), NOTIFICATION_RSP_TYPE_INTERIM,
+                                percentageVol, mRemoteDevice.getNotificationLabel());
                     }
                     break;
 
@@ -409,12 +404,12 @@ class AvrcpControllerStateMachine extends StateMachine {
                         } else {
                             if (mRemoteDevice.getAbsVolNotificationRequested()) {
                                 int percentageVol = getVolumePercentage();
-                                if (percentageVol != previousPercentageVol) {
+                                if (percentageVol != mPreviousPercentageVol) {
                                     AvrcpControllerService.sendRegisterAbsVolRspNative(
-                                        mRemoteDevice.getBluetoothAddress(),
-                                        NOTIFICATION_RSP_TYPE_CHANGED,
-                                        percentageVol, mRemoteDevice.getNotificationLabel());
-                                    previousPercentageVol = percentageVol;
+                                            mRemoteDevice.getBluetoothAddress(),
+                                            NOTIFICATION_RSP_TYPE_CHANGED, percentageVol,
+                                            mRemoteDevice.getNotificationLabel());
+                                    mPreviousPercentageVol = percentageVol;
                                     mRemoteDevice.setAbsVolNotificationRequested(false);
                                 }
                             }
@@ -423,11 +418,11 @@ class AvrcpControllerStateMachine extends StateMachine {
                     break;
 
                     case MESSAGE_PROCESS_TRACK_CHANGED:
+                        // Music start playing automatically and update Metadata
+                        mBroadcastMetadata = true;
                         mAddressedPlayer.updateCurrentTrack((TrackInfo) msg.obj);
-                        if (mBroadcastMetadata) {
-                            broadcastMetaDataChanged(mAddressedPlayer.getCurrentTrack().
-                                getMediaMetaData());
-                        }
+                        broadcastMetaDataChanged(
+                                mAddressedPlayer.getCurrentTrack().getMediaMetaData());
                         break;
 
                     case MESSAGE_PROCESS_PLAY_POS_CHANGED:
@@ -442,8 +437,8 @@ class AvrcpControllerStateMachine extends StateMachine {
                         mAddressedPlayer.setPlayStatus(status);
                         if (status == PlaybackState.STATE_PLAYING) {
                             a2dpSinkService.informTGStatePlaying(mRemoteDevice.mBTDevice, true);
-                        } else if (status == PlaybackState.STATE_PAUSED ||
-                            status == PlaybackState.STATE_STOPPED) {
+                        } else if (status == PlaybackState.STATE_PAUSED
+                                || status == PlaybackState.STATE_STOPPED) {
                             a2dpSinkService.informTGStatePlaying(mRemoteDevice.mBTDevice, false);
                         }
                         break;
@@ -460,7 +455,7 @@ class AvrcpControllerStateMachine extends StateMachine {
     // a) Send Change folder command
     // b) Once successful transition to folder fetch state.
     class ChangeFolderPath extends CmdState {
-        private String STATE_TAG = "AVRCPSM.ChangeFolderPath";
+        private static final String STATE_TAG = "AVRCPSM.ChangeFolderPath";
         private int mTmpIncrDirection;
         private String mID = "";
 
@@ -484,15 +479,15 @@ class AvrcpControllerStateMachine extends StateMachine {
 
                 case MESSAGE_PROCESS_FOLDER_PATH: {
                     // Fetch the listing of objects in this folder.
-                    Log.d(STATE_TAG, "MESSAGE_PROCESS_FOLDER_PATH returned " + msg.arg1 +
-                        " elements");
+                    Log.d(STATE_TAG,
+                            "MESSAGE_PROCESS_FOLDER_PATH returned " + msg.arg1 + " elements");
 
                     // Update the folder depth.
-                    if (mTmpIncrDirection ==
-                        AvrcpControllerService.FOLDER_NAVIGATION_DIRECTION_UP) {
-                        mBrowseDepth -= 1;;
-                    } else if (mTmpIncrDirection ==
-                        AvrcpControllerService.FOLDER_NAVIGATION_DIRECTION_DOWN) {
+                    if (mTmpIncrDirection
+                            == AvrcpControllerService.FOLDER_NAVIGATION_DIRECTION_UP) {
+                        mBrowseDepth -= 1;
+                    } else if (mTmpIncrDirection
+                            == AvrcpControllerService.FOLDER_NAVIGATION_DIRECTION_DOWN) {
                         mBrowseDepth += 1;
                     } else {
                         throw new IllegalStateException("incorrect nav " + mTmpIncrDirection);
@@ -500,10 +495,10 @@ class AvrcpControllerStateMachine extends StateMachine {
                     Log.d(STATE_TAG, "New browse depth " + mBrowseDepth);
 
                     if (msg.arg1 > 0) {
-                        sendMessage(MESSAGE_GET_FOLDER_LIST, 0, msg.arg1 -1, mID);
+                        sendMessage(MESSAGE_GET_FOLDER_LIST, 0, msg.arg1 - 1, mID);
                     } else {
                         // Return an empty response to the upper layer.
-                        broadcastFolderList(mID, mEmptyMediaItemList);
+                        broadcastFolderList(mID, EMPTY_MEDIA_ITEM_LIST);
                     }
                     mBrowseTree.setCurrentBrowsedFolder(mID);
                     transitionTo(mConnected);
@@ -514,7 +509,7 @@ class AvrcpControllerStateMachine extends StateMachine {
                     // We timed out changing folders. It is imperative we tell
                     // the upper layers that we failed by giving them an empty list.
                     Log.e(STATE_TAG, "change folder failed, sending empty list.");
-                    broadcastFolderList(mID, mEmptyMediaItemList);
+                    broadcastFolderList(mID, EMPTY_MEDIA_ITEM_LIST);
                     transitionTo(mConnected);
                     break;
 
@@ -530,7 +525,7 @@ class AvrcpControllerStateMachine extends StateMachine {
     // a) Fetch the listing of folders
     // b) Once completed return the object listing
     class GetFolderList extends CmdState {
-        private String STATE_TAG = "AVRCPSM.GetFolderList";
+        private static final String STATE_TAG = "AVRCPSM.GetFolderList";
 
         String mID = "";
         int mStartInd;
@@ -544,8 +539,8 @@ class AvrcpControllerStateMachine extends StateMachine {
             mCurrInd = 0;
             mFolderList.clear();
 
-            callNativeFunctionForScope(
-                mStartInd, Math.min(mEndInd, mStartInd + GET_FOLDER_ITEMS_PAGINATION_SIZE - 1));
+            callNativeFunctionForScope(mStartInd,
+                    Math.min(mEndInd, mStartInd + GET_FOLDER_ITEMS_PAGINATION_SIZE - 1));
         }
 
         public void setScope(int scope) {
@@ -573,8 +568,9 @@ class AvrcpControllerStateMachine extends StateMachine {
                     ArrayList<MediaItem> folderList = (ArrayList<MediaItem>) msg.obj;
                     mFolderList.addAll(folderList);
                     if (DBG) {
-                        Log.d(STATE_TAG, "Start " + mStartInd + " End " + mEndInd + " Curr " +
-                            mCurrInd + " received " + folderList.size());
+                        Log.d(STATE_TAG,
+                                "Start " + mStartInd + " End " + mEndInd + " Curr " + mCurrInd
+                                        + " received " + folderList.size());
                     }
                     mCurrInd += folderList.size();
 
@@ -582,14 +578,15 @@ class AvrcpControllerStateMachine extends StateMachine {
                     // for the list to populate.
                     sendFolderBroadcastAndUpdateNode();
 
-                    if (mCurrInd > mEndInd) {
+                    if (mCurrInd > mEndInd || folderList.size() == 0) {
+                        // If we have fetched all the elements or if the remotes sends us 0 elements
+                        // (which can lead us into a loop since mCurrInd does not proceed) we simply
+                        // abort.
                         transitionTo(mConnected);
                     } else {
                         // Fetch the next set of items.
-                        callNativeFunctionForScope(
-                            (byte) mCurrInd,
-                            (byte) Math.min(
-                                mEndInd, mCurrInd + GET_FOLDER_ITEMS_PAGINATION_SIZE - 1));
+                        callNativeFunctionForScope((byte) mCurrInd, (byte) Math.min(mEndInd,
+                                mCurrInd + GET_FOLDER_ITEMS_PAGINATION_SIZE - 1));
                         // Reset the timeout message since we are doing a new fetch now.
                         removeMessages(MESSAGE_INTERNAL_CMD_TIMEOUT);
                         sendMessageDelayed(MESSAGE_INTERNAL_CMD_TIMEOUT, CMD_TIMEOUT_MILLIS);
@@ -622,13 +619,11 @@ class AvrcpControllerStateMachine extends StateMachine {
             if (bn.isPlayer()) {
                 // Add the now playing folder.
                 MediaDescription.Builder mdb = new MediaDescription.Builder();
-                mdb.setMediaId(BrowseTree.NOW_PLAYING_PREFIX + ":" +
-                    bn.getPlayerID());
+                mdb.setMediaId(BrowseTree.NOW_PLAYING_PREFIX + ":" + bn.getPlayerID());
                 mdb.setTitle(BrowseTree.NOW_PLAYING_PREFIX);
                 Bundle mdBundle = new Bundle();
-                mdBundle.putString(
-                    AvrcpControllerService.MEDIA_ITEM_UID_KEY,
-                    BrowseTree.NOW_PLAYING_PREFIX + ":" + bn.getID());
+                mdBundle.putString(AvrcpControllerService.MEDIA_ITEM_UID_KEY,
+                        BrowseTree.NOW_PLAYING_PREFIX + ":" + bn.getID());
                 mdb.setExtras(mdBundle);
                 mFolderList.add(new MediaItem(mdb.build(), MediaItem.FLAG_BROWSABLE));
             }
@@ -646,11 +641,11 @@ class AvrcpControllerStateMachine extends StateMachine {
             switch (mScope) {
                 case AvrcpControllerService.BROWSE_SCOPE_NOW_PLAYING:
                     AvrcpControllerService.getNowPlayingListNative(
-                        mRemoteDevice.getBluetoothAddress(), (byte) start, (byte) end);
+                            mRemoteDevice.getBluetoothAddress(), (byte) start, (byte) end);
                     break;
                 case AvrcpControllerService.BROWSE_SCOPE_VFS:
-                    AvrcpControllerService.getFolderListNative(
-                        mRemoteDevice.getBluetoothAddress(), (byte) start, (byte) end);
+                    AvrcpControllerService.getFolderListNative(mRemoteDevice.getBluetoothAddress(),
+                            (byte) start, (byte) end);
                     break;
                 default:
                     Log.e(STATE_TAG, "Scope " + mScope + " cannot be handled here.");
@@ -662,19 +657,18 @@ class AvrcpControllerStateMachine extends StateMachine {
     // a) Fetch the listing of players
     // b) Once completed return the object listing
     class GetPlayerListing extends CmdState {
-        private String STATE_TAG = "AVRCPSM.GetPlayerList";
+        private static final String STATE_TAG = "AVRCPSM.GetPlayerList";
 
         @Override
         public boolean processMessage(Message msg) {
             Log.d(STATE_TAG, "processMessage " + msg);
             switch (msg.what) {
                 case MESSAGE_PROCESS_GET_PLAYER_ITEMS:
-                    List<AvrcpPlayer> playerList =
-                        (List<AvrcpPlayer>) msg.obj;
+                    List<AvrcpPlayer> playerList = (List<AvrcpPlayer>) msg.obj;
                     mBrowseTree.refreshChildren(BrowseTree.ROOT, playerList);
                     ArrayList<MediaItem> mediaItemList = new ArrayList<>();
-                    for (BrowseTree.BrowseNode c :
-                            mBrowseTree.findBrowseNodeByID(BrowseTree.ROOT).getChildren()) {
+                    for (BrowseTree.BrowseNode c : mBrowseTree.findBrowseNodeByID(BrowseTree.ROOT)
+                            .getChildren()) {
                         mediaItemList.add(c.getMediaItem());
                     }
                     broadcastFolderList(BrowseTree.ROOT, mediaItemList);
@@ -685,7 +679,7 @@ class AvrcpControllerStateMachine extends StateMachine {
                 case MESSAGE_INTERNAL_CMD_TIMEOUT:
                     // We have timed out to execute the request.
                     // Send an empty list here.
-                    broadcastFolderList(BrowseTree.ROOT, mEmptyMediaItemList);
+                    broadcastFolderList(BrowseTree.ROOT, EMPTY_MEDIA_ITEM_LIST);
                     transitionTo(mConnected);
                     break;
 
@@ -698,7 +692,7 @@ class AvrcpControllerStateMachine extends StateMachine {
     }
 
     class MoveToRoot extends CmdState {
-        private String STATE_TAG = "AVRCPSM.MoveToRoot";
+        private static final String STATE_TAG = "AVRCPSM.MoveToRoot";
         private String mID = "";
 
         public void setFolder(String id) {
@@ -727,9 +721,9 @@ class AvrcpControllerStateMachine extends StateMachine {
                         sendMessage(MESSAGE_GET_FOLDER_LIST, 0, 0xff, mID);
                     } else {
                         AvrcpControllerService.changeFolderPathNative(
-                            mRemoteDevice.getBluetoothAddress(),
-                            (byte) AvrcpControllerService.FOLDER_NAVIGATION_DIRECTION_UP,
-                            AvrcpControllerService.hexStringToByteUID(null));
+                                mRemoteDevice.getBluetoothAddress(),
+                                (byte) AvrcpControllerService.FOLDER_NAVIGATION_DIRECTION_UP,
+                                AvrcpControllerService.hexStringToByteUID(null));
                     }
                     break;
 
@@ -752,7 +746,7 @@ class AvrcpControllerStateMachine extends StateMachine {
     }
 
     class SetBrowsedPlayer extends CmdState {
-        private String STATE_TAG = "AVRCPSM.SetBrowsedPlayer";
+        private static final String STATE_TAG = "AVRCPSM.SetBrowsedPlayer";
         String mID = "";
 
         public void setFolder(String id) {
@@ -771,7 +765,7 @@ class AvrcpControllerStateMachine extends StateMachine {
                     // If we already on top of player and there is no content.
                     // This should very rarely happen.
                     if (mBrowseDepth == 0 && msg.arg1 == 0) {
-                        broadcastFolderList(mID, mEmptyMediaItemList);
+                        broadcastFolderList(mID, EMPTY_MEDIA_ITEM_LIST);
                         transitionTo(mConnected);
                     } else {
                         // Otherwise move to root and fetch the listing.
@@ -785,7 +779,7 @@ class AvrcpControllerStateMachine extends StateMachine {
                     break;
 
                 case MESSAGE_INTERNAL_CMD_TIMEOUT:
-                    broadcastFolderList(mID, mEmptyMediaItemList);
+                    broadcastFolderList(mID, EMPTY_MEDIA_ITEM_LIST);
                     transitionTo(mConnected);
                     break;
 
@@ -798,7 +792,7 @@ class AvrcpControllerStateMachine extends StateMachine {
     }
 
     class SetAddresedPlayerAndPlayItem extends CmdState {
-        private String STATE_TAG = "AVRCPSM.SetAddresedPlayerAndPlayItem";
+        private static final String STATE_TAG = "AVRCPSM.SetAddresedPlayerAndPlayItem";
         int mScope;
         String mPlayItemId;
         String mAddrPlayerId;
@@ -818,9 +812,9 @@ class AvrcpControllerStateMachine extends StateMachine {
                     mBrowseTree.setCurrentAddressedPlayer(mAddrPlayerId);
 
                     // And now play the item.
-                    AvrcpControllerService.playItemNative(
-                        mRemoteDevice.getBluetoothAddress(), (byte) mScope,
-                        AvrcpControllerService.hexStringToByteUID(mPlayItemId), (int) 0);
+                    AvrcpControllerService.playItemNative(mRemoteDevice.getBluetoothAddress(),
+                            (byte) mScope, AvrcpControllerService.hexStringToByteUID(mPlayItemId),
+                            (int) 0);
 
                     // Transition to connected state here.
                     transitionTo(mConnected);
@@ -885,7 +879,7 @@ class AvrcpControllerStateMachine extends StateMachine {
                     Log.d(TAG, "getCurrentMetaData mmd " + mmd);
                 }
             }
-            return mEmptyMMD;
+            return EMPTY_MEDIA_METADATA;
         }
     }
 
@@ -898,7 +892,7 @@ class AvrcpControllerStateMachine extends StateMachine {
             synchronized (mLock) {
                 if (mAddressedPlayer == null) {
                     return new PlaybackState.Builder().setState(PlaybackState.STATE_ERROR,
-                        PlaybackState.PLAYBACK_POSITION_UNKNOWN,0).build();
+                            PlaybackState.PLAYBACK_POSITION_UNKNOWN, 0).build();
                 }
                 return mAddressedPlayer.getPlaybackState();
             }
@@ -921,13 +915,13 @@ class AvrcpControllerStateMachine extends StateMachine {
         BrowseTree.BrowseNode bn = mBrowseTree.findBrowseNodeByID(parentMediaId);
         if (bn == null) {
             Log.e(TAG, "Invalid folder to browse " + mBrowseTree);
-            broadcastFolderList(parentMediaId, mEmptyMediaItemList);
+            broadcastFolderList(parentMediaId, EMPTY_MEDIA_ITEM_LIST);
             return;
         }
 
         if (DBG) {
-            Log.d(TAG, "To Browse folder " + bn + " is cached " + bn.isCached() +
-                " current folder " + mBrowseTree.getCurrentBrowsedFolder());
+            Log.d(TAG, "To Browse folder " + bn + " is cached " + bn.isCached() + " current folder "
+                    + mBrowseTree.getCurrentBrowsedFolder());
         }
         if (bn.equals(mBrowseTree.getCurrentBrowsedFolder()) && bn.isCached()) {
             if (DBG) {
@@ -946,8 +940,8 @@ class AvrcpControllerStateMachine extends StateMachine {
         int btDirection = mBrowseTree.getDirection(parentMediaId);
         BrowseTree.BrowseNode currFol = mBrowseTree.getCurrentBrowsedFolder();
         if (DBG) {
-            Log.d(TAG, "Browse direction parent " + mBrowseTree.getCurrentBrowsedFolder() +
-                " req " + parentMediaId + " direction " + btDirection);
+            Log.d(TAG, "Browse direction parent " + mBrowseTree.getCurrentBrowsedFolder() + " req "
+                    + parentMediaId + " direction " + btDirection);
         }
         if (BrowseTree.ROOT.equals(parentMediaId)) {
             // Root contains the list of players.
@@ -956,12 +950,11 @@ class AvrcpControllerStateMachine extends StateMachine {
             // Set browsed (and addressed player) as the new player.
             // This should fetch the list of folders.
             msg = obtainMessage(AvrcpControllerStateMachine.MESSAGE_SET_BROWSED_PLAYER,
-                bn.getPlayerID(), 0, bn.getID());
+                    bn.getPlayerID(), 0, bn.getID());
         } else if (bn.isNowPlaying()) {
             // Issue a request to fetch the items.
-            msg = obtainMessage(
-                AvrcpControllerStateMachine.MESSAGE_GET_NOW_PLAYING_LIST,
-                start, items, parentMediaId);
+            msg = obtainMessage(AvrcpControllerStateMachine.MESSAGE_GET_NOW_PLAYING_LIST, start,
+                    items, parentMediaId);
         } else {
             // Only change folder if desired. If an app refreshes a folder
             // (because it resumed etc) and current folder does not change
@@ -973,15 +966,15 @@ class AvrcpControllerStateMachine extends StateMachine {
             // In this condition we 'fake' child-parent hierarchy but it does not exist in
             // bluetooth world.
             boolean isNowPlayingToRoot =
-                currFol.isNowPlaying() && bn.getID().equals(BrowseTree.ROOT);
+                    currFol.isNowPlaying() && bn.getID().equals(BrowseTree.ROOT);
             if (!isNowPlayingToRoot) {
                 // Find the direction of traversal.
                 int direction = -1;
                 Log.d(TAG, "Browse direction " + currFol + " " + bn + " = " + btDirection);
                 if (btDirection == BrowseTree.DIRECTION_UNKNOWN) {
-                    Log.w(TAG, "parent " + bn + " is not a direct " +
-                        "successor or predeccessor of current folder " + currFol);
-                    broadcastFolderList(parentMediaId, mEmptyMediaItemList);
+                    Log.w(TAG, "parent " + bn + " is not a direct "
+                            + "successor or predeccessor of current folder " + currFol);
+                    broadcastFolderList(parentMediaId, EMPTY_MEDIA_ITEM_LIST);
                     return;
                 }
 
@@ -994,13 +987,12 @@ class AvrcpControllerStateMachine extends StateMachine {
                 Bundle b = new Bundle();
                 b.putString(AvrcpControllerService.EXTRA_FOLDER_ID, bn.getID());
                 b.putString(AvrcpControllerService.EXTRA_FOLDER_BT_ID, bn.getFolderUID());
-                msg = obtainMessage(
-                    AvrcpControllerStateMachine.MESSAGE_CHANGE_FOLDER_PATH, direction, 0, b);
+                msg = obtainMessage(AvrcpControllerStateMachine.MESSAGE_CHANGE_FOLDER_PATH,
+                        direction, 0, b);
             } else {
                 // Fetch the listing without changing paths.
-                msg = obtainMessage(
-                    AvrcpControllerStateMachine.MESSAGE_GET_FOLDER_LIST,
-                    start, items, bn.getFolderUID());
+                msg = obtainMessage(AvrcpControllerStateMachine.MESSAGE_GET_FOLDER_LIST, start,
+                        items, bn.getFolderUID());
             }
         }
 
@@ -1014,12 +1006,11 @@ class AvrcpControllerStateMachine extends StateMachine {
         BrowseTree.BrowseNode currFolder = mBrowseTree.getCurrentBrowsedFolder();
         Log.d(TAG, "fetchAttrAndPlayItem mediaId=" + uid + " node=" + currItem);
         if (currItem != null) {
-            int scope = currFolder.isNowPlaying() ?
-                AvrcpControllerService.BROWSE_SCOPE_NOW_PLAYING :
-                AvrcpControllerService.BROWSE_SCOPE_VFS;
-            Message msg = obtainMessage(
-                AvrcpControllerStateMachine.MESSAGE_FETCH_ATTR_AND_PLAY_ITEM,
-                scope, 0, currItem.getFolderUID());
+            int scope = currFolder.isNowPlaying() ? AvrcpControllerService.BROWSE_SCOPE_NOW_PLAYING
+                    : AvrcpControllerService.BROWSE_SCOPE_VFS;
+            Message msg =
+                    obtainMessage(AvrcpControllerStateMachine.MESSAGE_FETCH_ATTR_AND_PLAY_ITEM,
+                            scope, 0, currItem.getFolderUID());
             sendMessage(msg);
         }
     }
@@ -1037,8 +1028,7 @@ class AvrcpControllerStateMachine extends StateMachine {
         Intent intent = new Intent(AvrcpControllerService.ACTION_FOLDER_LIST);
         Log.d(TAG, "broadcastFolderList id " + id + " items " + items);
         intent.putExtra(AvrcpControllerService.EXTRA_FOLDER_ID, id);
-        intent.putParcelableArrayListExtra(
-            AvrcpControllerService.EXTRA_FOLDER_LIST, items);
+        intent.putParcelableArrayListExtra(AvrcpControllerService.EXTRA_FOLDER_LIST, items);
         mContext.sendBroadcast(intent, ProfileService.BLUETOOTH_PERM);
     }
 
@@ -1058,9 +1048,8 @@ class AvrcpControllerStateMachine extends StateMachine {
         // and amplifier volume.
         if (mRemoteDevice.getFirstAbsVolCmdRecvd()) {
             int newIndex = (maxVolume * absVol) / ABS_VOL_BASE;
-            Log.d(TAG,
-                " setAbsVolume =" + absVol + " maxVol = " + maxVolume + " cur = " + currIndex +
-                    " new = " + newIndex);
+            Log.d(TAG, " setAbsVolume =" + absVol + " maxVol = " + maxVolume + " cur = " + currIndex
+                    + " new = " + newIndex);
             /*
              * In some cases change in percentage is not sufficient enough to warrant
              * change in index values which are in range of 0-15. For such cases
@@ -1068,15 +1057,15 @@ class AvrcpControllerStateMachine extends StateMachine {
              */
             if (newIndex != currIndex) {
                 mAudioManager.setStreamVolume(AudioManager.STREAM_MUSIC, newIndex,
-                    AudioManager.FLAG_SHOW_UI);
+                        AudioManager.FLAG_SHOW_UI);
             }
         } else {
             mRemoteDevice.setFirstAbsVolCmdRecvd();
             absVol = (currIndex * ABS_VOL_BASE) / maxVolume;
             Log.d(TAG, " SetAbsVol recvd for first time, respond with " + absVol);
         }
-        AvrcpControllerService.sendAbsVolRspNative(
-            mRemoteDevice.getBluetoothAddress(), absVol, label);
+        AvrcpControllerService.sendAbsVolRspNative(mRemoteDevice.getBluetoothAddress(), absVol,
+                label);
     }
 
     private int getVolumePercentage() {
@@ -1137,28 +1126,30 @@ class AvrcpControllerStateMachine extends StateMachine {
     }
 
     public static String displayBluetoothAvrcpSettings(BluetoothAvrcpPlayerSettings mSett) {
-        StringBuffer sb =  new StringBuffer();
+        StringBuffer sb = new StringBuffer();
         int supportedSetting = mSett.getSettings();
-        if(VDBG) Log.d(TAG," setting: " + supportedSetting);
-        if((supportedSetting & BluetoothAvrcpPlayerSettings.SETTING_EQUALIZER) != 0) {
+        if (VDBG) {
+            Log.d(TAG, " setting: " + supportedSetting);
+        }
+        if ((supportedSetting & BluetoothAvrcpPlayerSettings.SETTING_EQUALIZER) != 0) {
             sb.append(" EQ : ");
-            sb.append(Integer.toString(mSett.getSettingValue(BluetoothAvrcpPlayerSettings.
-                                                             SETTING_EQUALIZER)));
+            sb.append(Integer.toString(mSett.getSettingValue(
+                    BluetoothAvrcpPlayerSettings.SETTING_EQUALIZER)));
         }
-        if((supportedSetting & BluetoothAvrcpPlayerSettings.SETTING_REPEAT) != 0) {
+        if ((supportedSetting & BluetoothAvrcpPlayerSettings.SETTING_REPEAT) != 0) {
             sb.append(" REPEAT : ");
-            sb.append(Integer.toString(mSett.getSettingValue(BluetoothAvrcpPlayerSettings.
-                                                             SETTING_REPEAT)));
+            sb.append(Integer.toString(mSett.getSettingValue(
+                    BluetoothAvrcpPlayerSettings.SETTING_REPEAT)));
         }
-        if((supportedSetting & BluetoothAvrcpPlayerSettings.SETTING_SHUFFLE) != 0) {
+        if ((supportedSetting & BluetoothAvrcpPlayerSettings.SETTING_SHUFFLE) != 0) {
             sb.append(" SHUFFLE : ");
-            sb.append(Integer.toString(mSett.getSettingValue(BluetoothAvrcpPlayerSettings.
-                                                             SETTING_SHUFFLE)));
+            sb.append(Integer.toString(mSett.getSettingValue(
+                    BluetoothAvrcpPlayerSettings.SETTING_SHUFFLE)));
         }
-        if((supportedSetting & BluetoothAvrcpPlayerSettings.SETTING_SCAN) != 0) {
+        if ((supportedSetting & BluetoothAvrcpPlayerSettings.SETTING_SCAN) != 0) {
             sb.append(" SCAN : ");
-            sb.append(Integer.toString(mSett.getSettingValue(BluetoothAvrcpPlayerSettings.
-                                                             SETTING_SCAN)));
+            sb.append(Integer.toString(mSett.getSettingValue(
+                    BluetoothAvrcpPlayerSettings.SETTING_SCAN)));
         }
         return sb.toString();
     }

@@ -46,7 +46,7 @@ import java.util.concurrent.TimeUnit;
  * @hide
  */
 
-final public class Utils {
+public final class Utils {
     private static final String TAG = "BluetoothUtils";
     private static final int MICROS_PER_UNIT = 625;
 
@@ -58,9 +58,8 @@ final public class Utils {
             return null;
         }
 
-        return String.format("%02X:%02X:%02X:%02X:%02X:%02X",
-                address[0], address[1], address[2], address[3], address[4],
-                address[5]);
+        return String.format("%02X:%02X:%02X:%02X:%02X:%02X", address[0], address[1], address[2],
+                address[3], address[4], address[5]);
     }
 
     public static byte[] getByteAddress(BluetoothDevice device) {
@@ -96,6 +95,17 @@ final public class Utils {
         ByteBuffer converter = ByteBuffer.wrap(valueBuf);
         converter.order(ByteOrder.nativeOrder());
         return converter.getInt(offset);
+    }
+
+    public static String byteArrayToString(byte[] valueBuf) {
+        StringBuilder sb = new StringBuilder();
+        for (int idx = 0; idx < valueBuf.length; idx++) {
+            if (idx != 0) {
+                sb.append(" ");
+            }
+            sb.append(String.format("%02x", valueBuf[idx]));
+        }
+        return sb.toString();
     }
 
     public static byte[] intToByteArray(int value) {
@@ -144,8 +154,8 @@ final public class Utils {
         converter.order(ByteOrder.BIG_ENDIAN);
 
         for (int i = 0; i < numUuids; i++) {
-            puuids[i] = new ParcelUuid(new UUID(converter.getLong(offset),
-                    converter.getLong(offset + 8)));
+            puuids[i] = new ParcelUuid(
+                    new UUID(converter.getLong(offset), converter.getLong(offset + 8)));
             offset += BD_UUID_LEN;
         }
         return puuids;
@@ -164,6 +174,20 @@ final public class Utils {
             default:
                 return "UNKNOWN";
         }
+    }
+
+    public static String ellipsize(String s) {
+        // Only ellipsize release builds
+        if (!Build.TYPE.equals("user")) {
+            return s;
+        }
+        if (s == null) {
+            return null;
+        }
+        if (s.length() < 3) {
+            return s;
+        }
+        return s.charAt(0) + "⋯" + s.charAt(s.length() - 1);
     }
 
     public static void copyStream(InputStream is, OutputStream os, int bufferSize)
@@ -211,9 +235,9 @@ final public class Utils {
             ok = (foregroundUser == callingUser);
             if (!ok) {
                 // Always allow SystemUI/System access.
-                final int systemUiUid = ActivityThread.getPackageManager().getPackageUid(
-                        "com.android.systemui", PackageManager.MATCH_SYSTEM_ONLY,
-                        UserHandle.USER_SYSTEM);
+                final int systemUiUid = ActivityThread.getPackageManager()
+                        .getPackageUid("com.android.systemui", PackageManager.MATCH_SYSTEM_ONLY,
+                                UserHandle.USER_SYSTEM);
                 ok = (systemUiUid == callingUid) || (Process.SYSTEM_UID == callingUid);
             }
         } catch (Exception ex) {
@@ -242,13 +266,12 @@ final public class Utils {
             int parentUser = (ui != null) ? ui.id : UserHandle.USER_NULL;
             // With calling identity cleared the current user is the foreground user.
             int foregroundUser = ActivityManager.getCurrentUser();
-            ok = (foregroundUser == callingUser) ||
-                    (foregroundUser == parentUser);
+            ok = (foregroundUser == callingUser) || (foregroundUser == parentUser);
             if (!ok) {
                 // Always allow SystemUI/System access.
-                final int systemUiUid = ActivityThread.getPackageManager().getPackageUid(
-                        "com.android.systemui", PackageManager.MATCH_SYSTEM_ONLY,
-                        UserHandle.USER_SYSTEM);
+                final int systemUiUid = ActivityThread.getPackageManager()
+                        .getPackageUid("com.android.systemui", PackageManager.MATCH_SYSTEM_ONLY,
+                                UserHandle.USER_SYSTEM);
                 ok = (systemUiUid == callingUid) || (Process.SYSTEM_UID == callingUid);
             }
         } catch (Exception ex) {
@@ -278,15 +301,15 @@ final public class Utils {
      */
     public static boolean checkCallerHasLocationPermission(Context context, AppOpsManager appOps,
             String callingPackage) {
-        if (context.checkCallingOrSelfPermission(android.Manifest.permission.
-                ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
-                && isAppOppAllowed(appOps, AppOpsManager.OP_FINE_LOCATION, callingPackage)) {
+        if (context.checkCallingOrSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION)
+                == PackageManager.PERMISSION_GRANTED && isAppOppAllowed(
+                        appOps, AppOpsManager.OP_FINE_LOCATION, callingPackage)) {
             return true;
         }
 
-        if (context.checkCallingOrSelfPermission(android.Manifest.permission.
-                ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
-                && isAppOppAllowed(appOps, AppOpsManager.OP_COARSE_LOCATION, callingPackage)) {
+        if (context.checkCallingOrSelfPermission(android.Manifest.permission.ACCESS_COARSE_LOCATION)
+                == PackageManager.PERMISSION_GRANTED && isAppOppAllowed(
+                        appOps, AppOpsManager.OP_COARSE_LOCATION, callingPackage)) {
             return true;
         }
         // Enforce location permission for apps targeting M and later versions
@@ -313,8 +336,8 @@ final public class Utils {
      * Returns true if the caller holds PEERS_MAC_ADDRESS.
      */
     public static boolean checkCallerHasPeersMacAddressPermission(Context context) {
-        return context.checkCallingOrSelfPermission(
-                android.Manifest.permission.PEERS_MAC_ADDRESS) == PackageManager.PERMISSION_GRANTED;
+        return context.checkCallingOrSelfPermission(android.Manifest.permission.PEERS_MAC_ADDRESS)
+                == PackageManager.PERMISSION_GRANTED;
     }
 
     public static boolean isLegacyForegroundApp(Context context, String pkgName) {
@@ -323,8 +346,8 @@ final public class Utils {
 
     private static boolean isMApp(Context context, String pkgName) {
         try {
-            return context.getPackageManager().getApplicationInfo(pkgName, 0)
-                    .targetSdkVersion >= Build.VERSION_CODES.M;
+            return context.getPackageManager().getApplicationInfo(pkgName, 0).targetSdkVersion
+                    >= Build.VERSION_CODES.M;
         } catch (PackageManager.NameNotFoundException e) {
             // In case of exception, assume M app
         }
@@ -337,7 +360,7 @@ final public class Utils {
      * @param pkgName application package name.
      */
     private static boolean isForegroundApp(Context context, String pkgName) {
-        ActivityManager am = (ActivityManager)context.getSystemService(Context.ACTIVITY_SERVICE);
+        ActivityManager am = (ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
         List<ActivityManager.RunningTaskInfo> tasks = am.getRunningTasks(1);
         return !tasks.isEmpty() && pkgName.equals(tasks.get(0).topActivity.getPackageName());
     }
