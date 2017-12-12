@@ -25,6 +25,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.media.AudioManager;
+import android.os.HandlerThread;
 import android.os.Message;
 import android.provider.Settings;
 import android.util.Log;
@@ -45,7 +46,10 @@ public class HeadsetService extends ProfileService {
     private static final String TAG = "HeadsetService";
     private static final String MODIFY_PHONE_STATE = android.Manifest.permission.MODIFY_PHONE_STATE;
 
+    private HandlerThread mStateMachinesThread;
     private HeadsetStateMachine mStateMachine;
+    private boolean mStarted;
+    private boolean mCreated;
     private static HeadsetService sHeadsetService;
 
     @Override
@@ -54,45 +58,73 @@ public class HeadsetService extends ProfileService {
     }
 
     @Override
-    public IProfileServiceBinder initBinder() {
+    public synchronized IProfileServiceBinder initBinder() {
         return new BluetoothHeadsetBinder(this);
     }
 
     @Override
-    protected boolean start() {
-        mStateMachine = HeadsetStateMachine.make(this);
-        IntentFilter filter = new IntentFilter(Intent.ACTION_BATTERY_CHANGED);
+    protected synchronized void create() {
+        mCreated = true;
+    }
+
+    @Override
+    protected synchronized boolean start() {
+        Log.i(TAG, "start()");
+        mStateMachinesThread = new HandlerThread("HeadsetService.StateMachines");
+        mStateMachinesThread.start();
+        mStateMachine = HeadsetStateMachine.make(this, mStateMachinesThread.getLooper(),
+                HeadsetNativeInterface.getInstance());
+        IntentFilter filter = new IntentFilter();
+        filter.addAction(Intent.ACTION_BATTERY_CHANGED);
         filter.addAction(AudioManager.VOLUME_CHANGED_ACTION);
         filter.addAction(BluetoothDevice.ACTION_CONNECTION_ACCESS_REPLY);
-        try {
-            registerReceiver(mHeadsetReceiver, filter);
-        } catch (Exception e) {
-            Log.w(TAG, "Unable to register headset receiver", e);
-        }
+        registerReceiver(mHeadsetReceiver, filter);
         setHeadsetService(this);
+        mStarted = true;
         return true;
     }
 
     @Override
-    protected boolean stop() {
-        try {
-            unregisterReceiver(mHeadsetReceiver);
-        } catch (Exception e) {
-            Log.w(TAG, "Unable to unregister headset receiver", e);
+    protected synchronized boolean stop() {
+        Log.i(TAG, "stop()");
+        if (!mStarted) {
+            Log.w(TAG, "stop() called before start()");
+            // Still return true because it is considered "stopped"
+            return true;
         }
-        if (mStateMachine != null) {
-            mStateMachine.doQuit();
-        }
+        mStarted = false;
+        unregisterReceiver(mHeadsetReceiver);
+        HeadsetStateMachine.destroy(mStateMachine);
+        mStateMachine = null;
+        mStateMachinesThread.quitSafely();
+        mStateMachinesThread = null;
+        setHeadsetService(null);
         return true;
     }
 
     @Override
-    protected boolean cleanup() {
-        if (mStateMachine != null) {
-            mStateMachine.cleanup();
+    protected synchronized boolean cleanup() {
+        Log.i(TAG, "cleanup");
+        if (!mCreated) {
+            Log.w(TAG, "cleanup() called before create()");
+            // Still return true as it is considered "not created"
+            return true;
         }
-        clearHeadsetService();
+        mCreated = false;
         return true;
+    }
+
+    /**
+     * Checks if this service object is able to accept binder calls
+     * @return True if the object can accept binder calls, False otherwise
+     */
+    public synchronized boolean isAlive() {
+        return isAvailable() && mCreated && mStarted;
+    }
+
+    // Handle messages from native (JNI) to Java
+    void messageFromNative(HeadsetStackEvent stackEvent) {
+        mStateMachine.sendMessage(HeadsetStateMachine.STACK_EVENT, stackEvent);
     }
 
     private final BroadcastReceiver mHeadsetReceiver = new BroadcastReceiver() {
@@ -123,7 +155,7 @@ public class HeadsetService extends ProfileService {
      */
     private static class BluetoothHeadsetBinder extends IBluetoothHeadset.Stub
             implements IProfileServiceBinder {
-        private HeadsetService mService;
+        private volatile HeadsetService mService;
 
         BluetoothHeadsetBinder(HeadsetService svc) {
             mService = svc;
@@ -136,15 +168,20 @@ public class HeadsetService extends ProfileService {
         }
 
         private HeadsetService getService() {
-            if (!Utils.checkCallerAllowManagedProfiles(mService)) {
+            final HeadsetService service = mService;
+            if (!Utils.checkCallerAllowManagedProfiles(service)) {
                 Log.w(TAG, "Headset call not allowed for non-active user");
                 return null;
             }
-
-            if (mService != null && mService.isAvailable()) {
-                return mService;
+            if (service == null) {
+                Log.w(TAG, "Service is null");
+                return null;
             }
-            return null;
+            if (!service.isAlive()) {
+                Log.w(TAG, "Service is not alive");
+                return null;
+            }
+            return service;
         }
 
         @Override
@@ -250,33 +287,6 @@ public class HeadsetService extends ProfileService {
         }
 
         @Override
-        public int getBatteryUsageHint(BluetoothDevice device) {
-            HeadsetService service = getService();
-            if (service == null) {
-                return 0;
-            }
-            return service.getBatteryUsageHint(device);
-        }
-
-        @Override
-        public boolean acceptIncomingConnect(BluetoothDevice device) {
-            HeadsetService service = getService();
-            if (service == null) {
-                return false;
-            }
-            return service.acceptIncomingConnect(device);
-        }
-
-        @Override
-        public boolean rejectIncomingConnect(BluetoothDevice device) {
-            HeadsetService service = getService();
-            if (service == null) {
-                return false;
-            }
-            return service.rejectIncomingConnect(device);
-        }
-
-        @Override
         public int getAudioState(BluetoothDevice device) {
             HeadsetService service = getService();
             if (service == null) {
@@ -377,36 +387,7 @@ public class HeadsetService extends ProfileService {
             }
             return service.sendVendorSpecificResultCode(device, command, arg);
         }
-
-        @Override
-        public boolean enableWBS() {
-            HeadsetService service = getService();
-            if (service == null) {
-                return false;
-            }
-            return service.enableWBS();
-        }
-
-        @Override
-        public boolean disableWBS() {
-            HeadsetService service = getService();
-            if (service == null) {
-                return false;
-            }
-            return service.disableWBS();
-        }
-
-        @Override
-        public void bindResponse(int indId, boolean indStatus) {
-            HeadsetService service = getService();
-            if (service == null) {
-                return;
-            }
-            service.bindResponse(indId, indStatus);
-        }
     }
-
-    ;
 
     // API methods
     public static synchronized HeadsetService getHeadsetService() {
@@ -427,24 +408,10 @@ public class HeadsetService extends ProfileService {
     }
 
     private static synchronized void setHeadsetService(HeadsetService instance) {
-        if (instance != null && instance.isAvailable()) {
-            if (DBG) {
-                Log.d(TAG, "setHeadsetService(): set to: " + sHeadsetService);
-            }
-            sHeadsetService = instance;
-        } else {
-            if (DBG) {
-                if (sHeadsetService == null) {
-                    Log.d(TAG, "setHeadsetService(): service not available");
-                } else if (!sHeadsetService.isAvailable()) {
-                    Log.d(TAG, "setHeadsetService(): service is cleaning up");
-                }
-            }
+        if (DBG) {
+            Log.d(TAG, "setHeadsetService(): set to: " + instance);
         }
-    }
-
-    private static synchronized void clearHeadsetService() {
-        sHeadsetService = null;
+        sHeadsetService = instance;
     }
 
     public boolean connect(BluetoothDevice device) {
@@ -548,21 +515,6 @@ public class HeadsetService extends ProfileService {
         return mStateMachine.isAudioConnected(device);
     }
 
-    int getBatteryUsageHint(BluetoothDevice device) {
-        // TODO(BT) ask for BT stack support?
-        return 0;
-    }
-
-    boolean acceptIncomingConnect(BluetoothDevice device) {
-        // TODO(BT) remove it if stack does access control
-        return false;
-    }
-
-    boolean rejectIncomingConnect(BluetoothDevice device) {
-        // TODO(BT) remove it if stack does access control
-        return false;
-    }
-
     int getAudioState(BluetoothDevice device) {
         return mStateMachine.getAudioState(device);
     }
@@ -653,58 +605,6 @@ public class HeadsetService extends ProfileService {
         mStateMachine.sendMessage(HeadsetStateMachine.SEND_VENDOR_SPECIFIC_RESULT_CODE,
                 new HeadsetVendorSpecificResultCode(device, command, arg));
         return true;
-    }
-
-    boolean enableWBS() {
-        // TODO(BT) BLUETOOTH or BLUETOOTH_ADMIN permission
-        enforceCallingOrSelfPermission(BLUETOOTH_PERM, "Need BLUETOOTH permission");
-        if (!mStateMachine.isConnected()) {
-            return false;
-        }
-        if (mStateMachine.isAudioOn()) {
-            return false;
-        }
-
-        for (BluetoothDevice device : getConnectedDevices()) {
-            mStateMachine.sendMessage(HeadsetStateMachine.ENABLE_WBS, device);
-        }
-
-        return true;
-    }
-
-    boolean disableWBS() {
-        // TODO(BT) BLUETOOTH or BLUETOOTH_ADMIN permission
-        enforceCallingOrSelfPermission(BLUETOOTH_PERM, "Need BLUETOOTH permission");
-        if (!mStateMachine.isConnected()) {
-            return false;
-        }
-        if (mStateMachine.isAudioOn()) {
-            return false;
-        }
-        for (BluetoothDevice device : getConnectedDevices()) {
-            mStateMachine.sendMessage(HeadsetStateMachine.DISABLE_WBS, device);
-        }
-        return true;
-    }
-
-    private boolean bindResponse(int indId, boolean indStatus) {
-        for (BluetoothDevice device : getConnectedDevices()) {
-            int connectionState = mStateMachine.getConnectionState(device);
-            if (connectionState != BluetoothProfile.STATE_CONNECTED
-                    && connectionState != BluetoothProfile.STATE_CONNECTING) {
-                continue;
-            }
-            if (DBG) {
-                Log.d("Bind Response sent for", device.getAddress());
-            }
-            Message msg = mStateMachine.obtainMessage(HeadsetStateMachine.BIND_RESPONSE);
-            msg.obj = device;
-            msg.arg1 = indId;
-            msg.arg2 = indStatus ? 1 : 0;
-            mStateMachine.sendMessage(msg);
-            return true;
-        }
-        return false;
     }
 
     @Override
