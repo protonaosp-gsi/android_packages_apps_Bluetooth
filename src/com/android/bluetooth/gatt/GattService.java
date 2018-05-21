@@ -54,16 +54,15 @@ import android.os.WorkSource;
 import android.provider.Settings;
 import android.util.Log;
 
+import com.android.bluetooth.BluetoothMetricsProto;
 import com.android.bluetooth.R;
 import com.android.bluetooth.Utils;
 import com.android.bluetooth.btservice.AbstractionLayer;
 import com.android.bluetooth.btservice.AdapterService;
-import com.android.bluetooth.btservice.BluetoothProto;
 import com.android.bluetooth.btservice.ProfileService;
 import com.android.bluetooth.util.NumberUtils;
 import com.android.internal.annotations.VisibleForTesting;
 
-import java.security.Security;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -157,20 +156,22 @@ public class GattService extends ProfileService {
 
     private int mMaxScanFilters;
 
-    static final int NUM_SCAN_EVENTS_KEPT = 20;
+    private static final int NUM_SCAN_EVENTS_KEPT = 20;
     /**
      * Internal list of scan events to use with the proto
      */
-    ArrayList<BluetoothProto.ScanEvent> mScanEvents =
-            new ArrayList<BluetoothProto.ScanEvent>(NUM_SCAN_EVENTS_KEPT);
+    private final ArrayList<BluetoothMetricsProto.ScanEvent> mScanEvents =
+            new ArrayList<>(NUM_SCAN_EVENTS_KEPT);
 
-    private Map<Integer, List<BluetoothGattService>> mGattClientDatabases =
-            new HashMap<Integer, List<BluetoothGattService>>();
+    private final Map<Integer, List<BluetoothGattService>> mGattClientDatabases = new HashMap<>();
 
+    private BluetoothAdapter mAdapter;
     private AdvertiseManager mAdvertiseManager;
     private PeriodicScanManager mPeriodicScanManager;
     private ScanManager mScanManager;
     private AppOpsManager mAppOps;
+
+    private static GattService sGattService;
 
     /**
      * Reliable write queue
@@ -179,11 +180,6 @@ public class GattService extends ProfileService {
 
     static {
         classInitNative();
-    }
-
-    @Override
-    protected String getName() {
-        return TAG;
     }
 
     @Override
@@ -197,6 +193,7 @@ public class GattService extends ProfileService {
             Log.d(TAG, "start()");
         }
         initializeNative();
+        mAdapter = BluetoothAdapter.getDefaultAdapter();
         mAppOps = getSystemService(AppOpsManager.class);
         mAdvertiseManager = new AdvertiseManager(this, AdapterService.getAdapterService());
         mAdvertiseManager.start();
@@ -207,6 +204,7 @@ public class GattService extends ProfileService {
         mPeriodicScanManager = new PeriodicScanManager(AdapterService.getAdapterService());
         mPeriodicScanManager.start();
 
+        setGattService(this);
         return true;
     }
 
@@ -215,6 +213,7 @@ public class GattService extends ProfileService {
         if (DBG) {
             Log.d(TAG, "stop()");
         }
+        setGattService(null);
         mScannerMap.clear();
         mClientMap.clear();
         mServerMap.clear();
@@ -233,7 +232,7 @@ public class GattService extends ProfileService {
     }
 
     @Override
-    protected boolean cleanup() {
+    protected void cleanup() {
         if (DBG) {
             Log.d(TAG, "cleanup()");
         }
@@ -247,7 +246,32 @@ public class GattService extends ProfileService {
         if (mPeriodicScanManager != null) {
             mPeriodicScanManager.cleanup();
         }
-        return true;
+    }
+
+
+    /**
+     * Get the current instance of {@link GattService}
+     *
+     * @return current instance of {@link GattService}
+     */
+    @VisibleForTesting
+    public static synchronized GattService getGattService() {
+        if (sGattService == null) {
+            Log.w(TAG, "getGattService(): service is null");
+            return null;
+        }
+        if (!sGattService.isAvailable()) {
+            Log.w(TAG, "getGattService(): service is not available");
+            return null;
+        }
+        return sGattService;
+    }
+
+    private static synchronized void setGattService(GattService instance) {
+        if (DBG) {
+            Log.d(TAG, "setGattService(): set to: " + instance);
+        }
+        sGattService = instance;
     }
 
     boolean permissionCheck(UUID uuid) {
@@ -374,9 +398,8 @@ public class GattService extends ProfileService {
         }
 
         @Override
-        public boolean cleanup() {
+        public void cleanup() {
             mService = null;
-            return true;
         }
 
         private GattService getService() {
@@ -652,6 +675,21 @@ public class GattService extends ProfileService {
         }
 
         @Override
+        public void leConnectionUpdate(int clientIf, String address,
+                int minConnectionInterval, int maxConnectionInterval,
+                int slaveLatency, int supervisionTimeout,
+                int minConnectionEventLen, int maxConnectionEventLen) {
+            GattService service = getService();
+            if (service == null) {
+                return;
+            }
+            service.leConnectionUpdate(clientIf, address, minConnectionInterval,
+                                       maxConnectionInterval, slaveLatency,
+                                       supervisionTimeout, minConnectionEventLen,
+                                       maxConnectionEventLen);
+        }
+
+        @Override
         public void registerServer(ParcelUuid uuid, IBluetoothGattServerCallback callback) {
             GattService service = getService();
             if (service == null) {
@@ -915,7 +953,6 @@ public class GattService extends ProfileService {
                     + rssi + ", periodicAdvInt=0x" + Integer.toHexString(periodicAdvInt));
         }
         List<UUID> remoteUuids = parseUuids(advData);
-        addScanResult();
 
         byte[] legacyAdvData = Arrays.copyOfRange(advData, 0, 62);
 
@@ -2450,7 +2487,26 @@ public class GattService extends ProfileService {
                     + connectionPriority + " interval=" + minInterval + "/" + maxInterval);
         }
         gattConnectionParameterUpdateNative(clientIf, address, minInterval, maxInterval, latency,
-                timeout);
+                timeout, 0, 0);
+    }
+
+    void leConnectionUpdate(int clientIf, String address, int minInterval,
+                            int maxInterval, int slaveLatency,
+                            int supervisionTimeout, int minConnectionEventLen,
+                            int maxConnectionEventLen) {
+        enforceCallingOrSelfPermission(BLUETOOTH_PERM, "Need BLUETOOTH permission");
+
+        if (DBG) {
+            Log.d(TAG, "leConnectionUpdate() - address=" + address + ", intervals="
+                        + minInterval + "/" + maxInterval + ", latency=" + slaveLatency
+                        + ", timeout=" + supervisionTimeout + "msec" + ", min_ce="
+                        + minConnectionEventLen + ", max_ce=" + maxConnectionEventLen);
+
+
+        }
+        gattConnectionParameterUpdateNative(clientIf, address, minInterval, maxInterval,
+                                            slaveLatency, supervisionTimeout,
+                                            minConnectionEventLen, maxConnectionEventLen);
     }
 
     /**************************************************************************
@@ -2832,6 +2888,17 @@ public class GattService extends ProfileService {
             db.add(GattDbElement.createSecondaryService(service.getUuid()));
         }
 
+        for (BluetoothGattService includedService : service.getIncludedServices()) {
+            int inclSrvcHandle = includedService.getInstanceId();
+
+            if (mHandleMap.checkServiceExists(includedService.getUuid(), inclSrvcHandle)) {
+                db.add(GattDbElement.createIncludedService(inclSrvcHandle));
+            } else {
+                Log.e(TAG,
+                        "included service with UUID " + includedService.getUuid() + " not found!");
+            }
+        }
+
         for (BluetoothGattCharacteristic characteristic : service.getCharacteristics()) {
             int permission =
                     ((characteristic.getKeySize() - 7) << 12) + characteristic.getPermissions();
@@ -2842,17 +2909,6 @@ public class GattService extends ProfileService {
                 permission =
                         ((characteristic.getKeySize() - 7) << 12) + descriptor.getPermissions();
                 db.add(GattDbElement.createDescriptor(descriptor.getUuid(), permission));
-            }
-        }
-
-        for (BluetoothGattService includedService : service.getIncludedServices()) {
-            int inclSrvcHandle = includedService.getInstanceId();
-
-            if (mHandleMap.checkServiceExists(includedService.getUuid(), inclSrvcHandle)) {
-                db.add(GattDbElement.createIncludedService(inclSrvcHandle));
-            } else {
-                Log.e(TAG,
-                        "included service with UUID " + includedService.getUuid() + " not found!");
             }
         }
 
@@ -2892,9 +2948,9 @@ public class GattService extends ProfileService {
             handle = entry.handle;
         }
 
-        int connId = mServerMap.connIdByAddress(serverIf, address);
-        gattServerSendResponseNative(serverIf, connId, requestId, (byte) status, handle, offset,
-                value, (byte) 0);
+        Integer connId = mServerMap.connIdByAddress(serverIf, address);
+        gattServerSendResponseNative(serverIf, connId != null ? connId : 0, requestId,
+                (byte) status, handle, offset, value, (byte) 0);
         mHandleMap.deleteRequest(requestId);
     }
 
@@ -2905,8 +2961,8 @@ public class GattService extends ProfileService {
             Log.d(TAG, "sendNotification() - address=" + address + " handle=" + handle);
         }
 
-        int connId = mServerMap.connIdByAddress(serverIf, address);
-        if (connId == 0) {
+        Integer connId = mServerMap.connIdByAddress(serverIf, address);
+        if (connId == null || connId == 0) {
             return;
         }
 
@@ -3094,16 +3150,7 @@ public class GattService extends ProfileService {
         mHandleMap.dump(sb);
     }
 
-    void addScanResult() {
-        if (mScanEvents.isEmpty()) {
-            return;
-        }
-
-        BluetoothProto.ScanEvent curr = mScanEvents.get(mScanEvents.size() - 1);
-        curr.setNumberResults(curr.getNumberResults() + 1);
-    }
-
-    void addScanEvent(BluetoothProto.ScanEvent event) {
+    void addScanEvent(BluetoothMetricsProto.ScanEvent event) {
         synchronized (mScanEvents) {
             if (mScanEvents.size() == NUM_SCAN_EVENTS_KEPT) {
                 mScanEvents.remove(0);
@@ -3113,11 +3160,9 @@ public class GattService extends ProfileService {
     }
 
     @Override
-    public void dumpProto(BluetoothProto.BluetoothLog proto) {
+    public void dumpProto(BluetoothMetricsProto.BluetoothLog.Builder builder) {
         synchronized (mScanEvents) {
-            for (BluetoothProto.ScanEvent event : mScanEvents) {
-                proto.addScanEvent(event);
-            }
+            builder.addAllScanEvent(mScanEvents);
         }
     }
 
@@ -3200,7 +3245,8 @@ public class GattService extends ProfileService {
     private native void gattClientConfigureMTUNative(int connId, int mtu);
 
     private native void gattConnectionParameterUpdateNative(int clientIf, String address,
-            int minInterval, int maxInterval, int latency, int timeout);
+            int minInterval, int maxInterval, int latency, int timeout, int minConnectionEventLen,
+            int maxConnectionEventLen);
 
     private native void gattServerRegisterAppNative(long appUuidLsb, long appUuidMsb);
 

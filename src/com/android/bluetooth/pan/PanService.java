@@ -37,7 +37,9 @@ import android.os.UserManager;
 import android.provider.Settings;
 import android.util.Log;
 
+import com.android.bluetooth.BluetoothMetricsProto;
 import com.android.bluetooth.Utils;
+import com.android.bluetooth.btservice.MetricsLogger;
 import com.android.bluetooth.btservice.ProfileService;
 
 import java.net.InetAddress;
@@ -79,47 +81,27 @@ public class PanService extends ProfileService {
     }
 
     @Override
-    protected String getName() {
-        return TAG;
-    }
-
-    @Override
     public IProfileServiceBinder initBinder() {
         return new BluetoothPanBinder(this);
     }
 
     public static synchronized PanService getPanService() {
-        if (sPanService != null && sPanService.isAvailable()) {
-            if (DBG) {
-                Log.d(TAG, "getPanService(): returning " + sPanService);
-            }
-            return sPanService;
+        if (sPanService == null) {
+            Log.w(TAG, "getPanService(): service is null");
+            return null;
         }
-        if (DBG) {
-            if (sPanService == null) {
-                Log.d(TAG, "getPanService(): service is NULL");
-            } else if (!sPanService.isAvailable()) {
-                Log.d(TAG, "getPanService(): service is not available");
-            }
+        if (!sPanService.isAvailable()) {
+            Log.w(TAG, "getPanService(): service is not available ");
+            return null;
         }
-        return null;
+        return sPanService;
     }
 
     private static synchronized void setPanService(PanService instance) {
-        if (instance != null && instance.isAvailable()) {
-            if (DBG) {
-                Log.d(TAG, "setPanService(): set to: " + instance);
-            }
-            sPanService = instance;
-        } else {
-            if (DBG) {
-                if (instance == null) {
-                    Log.d(TAG, "setPanService(): service not available");
-                } else if (!instance.isAvailable()) {
-                    Log.d(TAG, "setPanService(): service is cleaning up");
-                }
-            }
+        if (DBG) {
+            Log.d(TAG, "setPanService(): set to: " + instance);
         }
+        sPanService = instance;
     }
 
     @Override
@@ -149,20 +131,29 @@ public class PanService extends ProfileService {
     }
 
     @Override
-    protected boolean cleanup() {
+    protected void cleanup() {
+        // TODO(b/72948646): this should be moved to stop()
+        setPanService(null);
         if (mNativeAvailable) {
             cleanupNative();
             mNativeAvailable = false;
         }
         if (mPanDevices != null) {
-            List<BluetoothDevice> devList = getConnectedDevices();
-            for (BluetoothDevice dev : devList) {
-                handlePanDeviceStateChange(dev, mPanIfName, BluetoothProfile.STATE_DISCONNECTED,
-                        BluetoothPan.LOCAL_PANU_ROLE, BluetoothPan.REMOTE_NAP_ROLE);
+           int[] desiredStates = {BluetoothProfile.STATE_CONNECTING, BluetoothProfile.STATE_CONNECTED,
+                                  BluetoothProfile.STATE_DISCONNECTING};
+           List<BluetoothDevice> devList =
+                   getDevicesMatchingConnectionStates(desiredStates);
+           for (BluetoothDevice device : devList) {
+                BluetoothPanDevice panDevice = mPanDevices.get(device);
+                Log.d(TAG, "panDevice: " + panDevice + " device address: " + device);
+                if (panDevice != null) {
+                    handlePanDeviceStateChange(device, mPanIfName,
+                        BluetoothProfile.STATE_DISCONNECTED,
+                        panDevice.mLocalRole, panDevice.mRemoteRole);
+                }
             }
             mPanDevices.clear();
         }
-        return true;
     }
 
     private final Handler mHandler = new Handler() {
@@ -200,7 +191,8 @@ public class PanService extends ProfileService {
                     BluetoothDevice device = getDevice(cs.addr);
                     // TBD get iface from the msg
                     if (DBG) {
-                        log("MESSAGE_CONNECT_STATE_CHANGED: " + device + " state: " + cs.state);
+                        Log.d(TAG,
+                                "MESSAGE_CONNECT_STATE_CHANGED: " + device + " state: " + cs.state);
                     }
                     handlePanDeviceStateChange(device, mPanIfName /* iface */,
                             convertHalState(cs.state), cs.local_role, cs.remote_role);
@@ -222,9 +214,8 @@ public class PanService extends ProfileService {
         }
 
         @Override
-        public boolean cleanup() {
+        public void cleanup() {
             mService = null;
-            return true;
         }
 
         private PanService getService() {
@@ -469,8 +460,8 @@ public class PanService extends ProfileService {
     private void onConnectStateChanged(byte[] address, int state, int error, int localRole,
             int remoteRole) {
         if (DBG) {
-            log("onConnectStateChanged: " + state + ", local role:" + localRole + ", remoteRole: "
-                    + remoteRole);
+            Log.d(TAG, "onConnectStateChanged: " + state + ", local role:" + localRole
+                    + ", remoteRole: " + remoteRole);
         }
         Message msg = mHandler.obtainMessage(MESSAGE_CONNECT_STATE_CHANGED);
         msg.obj = new ConnectState(address, state, error, localRole, remoteRole);
@@ -479,7 +470,8 @@ public class PanService extends ProfileService {
 
     private void onControlStateChanged(int localRole, int state, int error, String ifname) {
         if (DBG) {
-            log("onControlStateChanged: " + state + ", error: " + error + ", ifname: " + ifname);
+            Log.d(TAG, "onControlStateChanged: " + state + ", error: " + error + ", ifname: "
+                    + ifname);
         }
         if (error == 0) {
             mPanIfName = ifname;
@@ -515,12 +507,13 @@ public class PanService extends ProfileService {
         if (panDevice == null) {
             Log.i(TAG, "state " + state + " Num of connected pan devices: " + mPanDevices.size());
             prevState = BluetoothProfile.STATE_DISCONNECTED;
-            panDevice = new BluetoothPanDevice(state, iface, localRole);
+            panDevice = new BluetoothPanDevice(state, iface, localRole, remoteRole);
             mPanDevices.put(device, panDevice);
         } else {
             prevState = panDevice.mState;
             panDevice.mState = state;
             panDevice.mLocalRole = localRole;
+            panDevice.mRemoteRole = remoteRole;
             panDevice.mIface = iface;
         }
 
@@ -574,14 +567,15 @@ public class PanService extends ProfileService {
                     + ", prevState = " + prevState);
             if (state == BluetoothProfile.STATE_CONNECTED) {
                 mNetworkFactory.startReverseTether(iface);
-            } else if (state == BluetoothProfile.STATE_DISCONNECTED && (
-                    prevState == BluetoothProfile.STATE_CONNECTED
-                            || prevState == BluetoothProfile.STATE_DISCONNECTING)) {
+            } else if (state == BluetoothProfile.STATE_DISCONNECTED) {
                 mNetworkFactory.stopReverseTether();
                 mPanDevices.remove(device);
             }
         }
 
+        if (state == BluetoothProfile.STATE_CONNECTED) {
+            MetricsLogger.logProfileConnectionEvent(BluetoothMetricsProto.ProfileId.PAN);
+        }
         /* Notifying the connection state change of the profile before sending the intent for
            connection state change, as it was causing a race condition, with the UI not being
            updated with the correct connection state. */
@@ -709,11 +703,13 @@ public class PanService extends ProfileService {
         private int mState;
         private String mIface;
         private int mLocalRole; // Which local role is this PAN device bound to
+        private int mRemoteRole; // Which remote role is this PAN device bound to
 
-        BluetoothPanDevice(int state, String iface, int localRole) {
+        BluetoothPanDevice(int state, String iface, int localRole, int remoteRole) {
             mState = state;
             mIface = iface;
             mLocalRole = localRole;
+            mRemoteRole = remoteRole;
         }
     }
 

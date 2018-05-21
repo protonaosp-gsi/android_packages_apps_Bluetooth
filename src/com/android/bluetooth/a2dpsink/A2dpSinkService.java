@@ -44,11 +44,6 @@ public class A2dpSinkService extends ProfileService {
     private static A2dpSinkService sA2dpSinkService;
 
     @Override
-    protected String getName() {
-        return TAG;
-    }
-
-    @Override
     protected IProfileServiceBinder initBinder() {
         return new BluetoothA2dpSinkBinder(this);
     }
@@ -71,6 +66,7 @@ public class A2dpSinkService extends ProfileService {
         if (DBG) {
             Log.d(TAG, "stop()");
         }
+        setA2dpSinkService(null);
         if (mStateMachine != null) {
             mStateMachine.doQuit();
         }
@@ -80,52 +76,31 @@ public class A2dpSinkService extends ProfileService {
     }
 
     @Override
-    protected boolean cleanup() {
+    protected void cleanup() {
         if (mStateMachine != null) {
             mStateMachine.cleanup();
         }
-        clearA2dpSinkService();
-        return true;
     }
 
     //API Methods
 
     public static synchronized A2dpSinkService getA2dpSinkService() {
-        if (sA2dpSinkService != null && sA2dpSinkService.isAvailable()) {
-            if (DBG) {
-                Log.d(TAG, "getA2dpSinkService(): returning " + sA2dpSinkService);
-            }
-            return sA2dpSinkService;
+        if (sA2dpSinkService == null) {
+            Log.w(TAG, "getA2dpSinkService(): service is null");
+            return null;
         }
-        if (DBG) {
-            if (sA2dpSinkService == null) {
-                Log.d(TAG, "getA2dpSinkService(): service is NULL");
-            } else if (!(sA2dpSinkService.isAvailable())) {
-                Log.d(TAG, "getA2dpSinkService(): service is not available");
-            }
+        if (!sA2dpSinkService.isAvailable()) {
+            Log.w(TAG, "getA2dpSinkService(): service is not available ");
+            return null;
         }
-        return null;
+        return sA2dpSinkService;
     }
 
     private static synchronized void setA2dpSinkService(A2dpSinkService instance) {
-        if (instance != null && instance.isAvailable()) {
-            if (DBG) {
-                Log.d(TAG, "setA2dpSinkService(): set to: " + sA2dpSinkService);
-            }
-            sA2dpSinkService = instance;
-        } else {
-            if (DBG) {
-                if (sA2dpSinkService == null) {
-                    Log.d(TAG, "setA2dpSinkService(): service not available");
-                } else if (!sA2dpSinkService.isAvailable()) {
-                    Log.d(TAG, "setA2dpSinkService(): service is cleaning up");
-                }
-            }
+        if (DBG) {
+            Log.d(TAG, "setA2dpSinkService(): set to: " + instance);
         }
-    }
-
-    private static synchronized void clearA2dpSinkService() {
-        sA2dpSinkService = null;
+        sA2dpSinkService = instance;
     }
 
     public boolean connect(BluetoothDevice device) {
@@ -276,9 +251,8 @@ public class A2dpSinkService extends ProfileService {
         }
 
         @Override
-        public boolean cleanup() {
+        public void cleanup() {
             mService = null;
-            return true;
         }
 
         @Override

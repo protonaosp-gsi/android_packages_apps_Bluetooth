@@ -24,9 +24,9 @@ import android.util.Log;
 import com.android.bluetooth.Utils;
 
 /**
- * Defines native calls that is used by state machine/service to either send or receive
- * messages from the native stack. This file is registered for the native methods in corresponding
- * CPP file.
+ * Defines native calls that are used by state machine/service to either send or receive
+ * messages to/from the native stack. This file is registered for the native methods in
+ * corresponding CPP file.
  */
 public class HeadsetNativeInterface {
     private static final String TAG = "HeadsetNativeInterface";
@@ -197,17 +197,27 @@ public class HeadsetNativeInterface {
         sendMessageToService(event);
     }
 
+    private void onAtBia(boolean service, boolean roam, boolean signal, boolean battery,
+            byte[] address) {
+        HeadsetAgIndicatorEnableState agIndicatorEnableState =
+                new HeadsetAgIndicatorEnableState(service, roam, signal, battery);
+        HeadsetStackEvent event =
+                new HeadsetStackEvent(HeadsetStackEvent.EVENT_TYPE_BIA, agIndicatorEnableState,
+                        getDevice(address));
+        sendMessageToService(event);
+    }
+
     // Native wrappers to help unit testing
 
     /**
      * Initialize native stack
      *
      * @param maxHfClients maximum number of headset clients that can be connected simultaneously
-     * @param inbandRingingSupported whether in-band ringing is supported on this AG
+     * @param inbandRingingEnabled whether in-band ringing is enabled on this AG
      */
     @VisibleForTesting
-    public void init(int maxHfClients, boolean inbandRingingSupported) {
-        initializeNative(maxHfClients, inbandRingingSupported);
+    public void init(int maxHfClients, boolean inbandRingingEnabled) {
+        initializeNative(maxHfClients, inbandRingingEnabled);
     }
 
     /**
@@ -346,13 +356,14 @@ public class HeadsetNativeInterface {
     /**
      * Combined device status change notification
      *
+     * @param device target device
      * @param deviceState device status object
      * @return True on success, False on failure
      */
     @VisibleForTesting
-    public boolean notifyDeviceStatus(HeadsetDeviceState deviceState) {
+    public boolean notifyDeviceStatus(BluetoothDevice device, HeadsetDeviceState deviceState) {
         return notifyDeviceStatusNative(deviceState.mService, deviceState.mRoam,
-                deviceState.mSignal, deviceState.mBatteryCharge);
+                deviceState.mSignal, deviceState.mBatteryCharge, Utils.getByteAddress(device));
     }
 
     /**
@@ -401,13 +412,15 @@ public class HeadsetNativeInterface {
      *                   This will take one of the values from BtHfCallState
      *    3. number & type: valid only for incoming & waiting call
      *
+     * @param device target device for this update
      * @param callState callstate structure
      * @return True on success, False on failure
      */
     @VisibleForTesting
-    public boolean phoneStateChange(HeadsetCallState callState) {
+    public boolean phoneStateChange(BluetoothDevice device, HeadsetCallState callState) {
         return phoneStateChangeNative(callState.mNumActive, callState.mNumHeld,
-                callState.mCallState, callState.mNumber, callState.mType);
+                callState.mCallState, callState.mNumber, callState.mType,
+                Utils.getByteAddress(device));
     }
 
     /**
@@ -421,6 +434,28 @@ public class HeadsetNativeInterface {
         return setScoAllowedNative(value);
     }
 
+    /**
+     * Enable or disable in-band ringing for the current service level connection through sending
+     * +BSIR AT command
+     *
+     * @param value True to enable, False to disable
+     * @return True on success, False on failure
+     */
+    @VisibleForTesting
+    public boolean sendBsir(BluetoothDevice device, boolean value) {
+        return sendBsirNative(value, Utils.getByteAddress(device));
+    }
+
+    /**
+     * Set the current active headset device for SCO audio
+     * @param device current active SCO device
+     * @return true on success
+     */
+    @VisibleForTesting
+    public boolean setActiveDevice(BluetoothDevice device) {
+        return setActiveDeviceNative(Utils.getByteAddress(device));
+    }
+
     /* Native methods */
     private static native void classInitNative();
 
@@ -428,7 +463,7 @@ public class HeadsetNativeInterface {
 
     private native boolean atResponseStringNative(String responseString, byte[] address);
 
-    private native void initializeNative(int maxHfClients, boolean inbandRingEnable);
+    private native void initializeNative(int maxHfClients, boolean inbandRingingEnabled);
 
     private native void cleanupNative();
 
@@ -450,7 +485,7 @@ public class HeadsetNativeInterface {
             int callState, int signal, int roam, int batteryCharge, byte[] address);
 
     private native boolean notifyDeviceStatusNative(int networkState, int serviceType, int signal,
-            int batteryCharge);
+            int batteryCharge, byte[] address);
 
     private native boolean clccResponseNative(int index, int dir, int status, int mode,
             boolean mpty, String number, int type, byte[] address);
@@ -458,7 +493,11 @@ public class HeadsetNativeInterface {
     private native boolean copsResponseNative(String operatorName, byte[] address);
 
     private native boolean phoneStateChangeNative(int numActive, int numHeld, int callState,
-            String number, int type);
+            String number, int type, byte[] address);
 
     private native boolean setScoAllowedNative(boolean value);
+
+    private native boolean sendBsirNative(boolean value, byte[] address);
+
+    private native boolean setActiveDeviceNative(byte[] address);
 }

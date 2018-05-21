@@ -49,7 +49,6 @@ import android.os.HandlerThread;
 import android.os.Looper;
 import android.os.Message;
 import android.os.ParcelUuid;
-import android.os.PowerManager;
 import android.os.Process;
 import android.util.Log;
 
@@ -172,11 +171,9 @@ public class BluetoothOppTransfer implements BluetoothOppBatch.BluetoothOppBatch
         }
     }
 
-    ;
-
     private OppConnectionReceiver mBluetoothReceiver;
 
-    public BluetoothOppTransfer(Context context, PowerManager powerManager, BluetoothOppBatch batch,
+    public BluetoothOppTransfer(Context context, BluetoothOppBatch batch,
             BluetoothOppObexSession session) {
 
         mContext = context;
@@ -188,9 +185,8 @@ public class BluetoothOppTransfer implements BluetoothOppBatch.BluetoothOppBatch
 
     }
 
-    public BluetoothOppTransfer(Context context, PowerManager powerManager,
-            BluetoothOppBatch batch) {
-        this(context, powerManager, batch, null);
+    public BluetoothOppTransfer(Context context, BluetoothOppBatch batch) {
+        this(context, batch, null);
     }
 
     public int getBatchId() {
@@ -329,7 +325,7 @@ public class BluetoothOppTransfer implements BluetoothOppBatch.BluetoothOppBatch
                         if (info3 != null) {
                             markBatchFailed(info3.mStatus);
                         } else {
-                            markBatchFailed();
+                            markBatchFailed(BluetoothShare.STATUS_UNKNOWN_ERROR);
                         }
                         tickShareStatus(mCurrentShare);
                     }
@@ -445,10 +441,6 @@ public class BluetoothOppTransfer implements BluetoothOppBatch.BluetoothOppBatch
 
     }
 
-    private void markBatchFailed() {
-        markBatchFailed(BluetoothShare.STATUS_UNKNOWN_ERROR);
-    }
-
     /*
      * NOTE
      * For outbound transfer
@@ -478,7 +470,7 @@ public class BluetoothOppTransfer implements BluetoothOppBatch.BluetoothOppBatch
          */
         if (!mAdapter.isEnabled()) {
             Log.e(TAG, "Can't start transfer when Bluetooth is disabled for " + mBatch.mId);
-            markBatchFailed();
+            markBatchFailed(BluetoothShare.STATUS_UNKNOWN_ERROR);
             mBatch.mStatus = Constants.BATCH_STATUS_FAILED;
             return;
         }
@@ -513,6 +505,13 @@ public class BluetoothOppTransfer implements BluetoothOppBatch.BluetoothOppBatch
         if (V) {
             Log.v(TAG, "stop");
         }
+        if (mSession != null) {
+            if (V) {
+                Log.v(TAG, "Stop mSession");
+            }
+            mSession.stop();
+        }
+
         cleanUp();
         if (mConnectThread != null) {
             try {
@@ -527,12 +526,6 @@ public class BluetoothOppTransfer implements BluetoothOppBatch.BluetoothOppBatch
                 }
             }
             mConnectThread = null;
-        }
-        if (mSession != null) {
-            if (V) {
-                Log.v(TAG, "Stop mSession");
-            }
-            mSession.stop();
         }
         // Prevent concurrent access
         synchronized (this) {
@@ -574,7 +567,7 @@ public class BluetoothOppTransfer implements BluetoothOppBatch.BluetoothOppBatch
             if (mSession == null) {
                 /** set current share as error */
                 Log.e(TAG, "Unexpected error happened !");
-                markBatchFailed();
+                markBatchFailed(BluetoothShare.STATUS_UNKNOWN_ERROR);
                 mBatch.mStatus = Constants.BATCH_STATUS_FAILED;
                 return;
             }
@@ -828,7 +821,7 @@ public class BluetoothOppTransfer implements BluetoothOppBatch.BluetoothOppBatch
                 return;
             }
         }
-    };
+    }
 
     private void markConnectionFailed(BluetoothSocket s) {
         if (V) {

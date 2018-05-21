@@ -27,6 +27,7 @@
 #include <android_util_Binder.h>
 #include <base/logging.h>
 #include <base/strings/stringprintf.h>
+#include <cutils/properties.h>
 #include <dlfcn.h>
 #include <errno.h>
 #include <pthread.h>
@@ -36,6 +37,7 @@
 #include <sys/prctl.h>
 #include <sys/stat.h>
 
+#include <hardware/bluetooth.h>
 #include <mutex>
 
 using base::StringPrintf;
@@ -598,14 +600,16 @@ static bt_os_callouts_t sBluetoothOsCallouts = {
     acquire_wake_lock_callout, release_wake_lock_callout,
 };
 
-#define BLUETOOTH_LIBRARY_NAME "libbluetooth.so"
+#define PROPERTY_BT_LIBRARY_NAME "ro.bluetooth.library_name"
+#define DEFAULT_BT_LIBRARY_NAME "libbluetooth.so"
 
 int hal_util_load_bt_library(const bt_interface_t** interface) {
   const char* sym = BLUETOOTH_INTERFACE_STRING;
   bt_interface_t* itf = nullptr;
 
-  // Always try to load the default Bluetooth stack on GN builds.
-  const char* path = BLUETOOTH_LIBRARY_NAME;
+  // The library name is not set by default, so the preset library name is used.
+  char path[PROPERTY_VALUE_MAX] = "";
+  property_get(PROPERTY_BT_LIBRARY_NAME, path, DEFAULT_BT_LIBRARY_NAME);
   void* handle = dlopen(path, RTLD_NOW);
   if (!handle) {
     const char* err_str = dlerror();
@@ -1172,6 +1176,19 @@ static void dumpNative(JNIEnv* env, jobject obj, jobject fdObj,
   delete[] argObjs;
 }
 
+static jbyteArray dumpMetricsNative(JNIEnv* env, jobject obj) {
+  ALOGI("%s", __func__);
+  if (!sBluetoothInterface) return env->NewByteArray(0);
+
+  std::string output;
+  sBluetoothInterface->dumpMetrics(&output);
+  jsize output_size = output.size() * sizeof(char);
+  jbyteArray output_bytes = env->NewByteArray(output_size);
+  env->SetByteArrayRegion(output_bytes, 0, output_size,
+                          (const jbyte*)output.data());
+  return output_bytes;
+}
+
 static jboolean factoryResetNative(JNIEnv* env, jobject obj) {
   ALOGV("%s", __func__);
   if (!sBluetoothInterface) return JNI_FALSE;
@@ -1231,6 +1248,7 @@ static JNINativeMethod sMethods[] = {
     {"readEnergyInfo", "()I", (void*)readEnergyInfo},
     {"dumpNative", "(Ljava/io/FileDescriptor;[Ljava/lang/String;)V",
      (void*)dumpNative},
+    {"dumpMetricsNative", "()[B", (void*)dumpMetricsNative},
     {"factoryResetNative", "()Z", (void*)factoryResetNative},
     {"interopDatabaseClearNative", "()V", (void*)interopDatabaseClearNative},
     {"interopDatabaseAddNative", "(I[BI)V", (void*)interopDatabaseAddNative}};
@@ -1294,6 +1312,11 @@ jint JNI_OnLoad(JavaVM* jvm, void* reserved) {
     return JNI_ERR;
   }
 
+  status = android::register_com_android_bluetooth_avrcp_target(e);
+  if (status < 0) {
+    ALOGE("jni new avrcp target registration failure: %d", status);
+  }
+
   status = android::register_com_android_bluetooth_avrcp_controller(e);
   if (status < 0) {
     ALOGE("jni avrcp controller registration failure: %d", status);
@@ -1333,6 +1356,12 @@ jint JNI_OnLoad(JavaVM* jvm, void* reserved) {
   status = android::register_com_android_bluetooth_sdp(e);
   if (status < 0) {
     ALOGE("jni sdp registration failure: %d", status);
+    return JNI_ERR;
+  }
+
+  status = android::register_com_android_bluetooth_hearing_aid(e);
+  if (status < 0) {
+    ALOGE("jni hearing aid registration failure: %d", status);
     return JNI_ERR;
   }
 

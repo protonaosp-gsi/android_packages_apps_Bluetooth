@@ -28,14 +28,18 @@ class NativeInterface {
     private static final String TAG = "NativeInterface";
     private static final boolean DBG = false;
 
+    static {
+        classInitNative();
+    }
+
     NativeInterface() {}
 
     // Native methods that call into the JNI interface
     static native void classInitNative();
 
-    static native void initializeNative();
+    native void initializeNative();
 
-    static native void cleanupNative();
+    native void cleanupNative();
 
     static native boolean connectNative(byte[] address);
 
@@ -387,7 +391,19 @@ class NativeInterface {
     }
 
     private void onInBandRing(int inBand, byte[] address) {
-        Log.w(TAG, "onInBandRing not supported");
+        StackEvent event = new StackEvent(StackEvent.EVENT_TYPE_IN_BAND_RINGTONE);
+        event.valueInt = inBand;
+        event.device = getDevice(address);
+        if (DBG) {
+            Log.d(TAG, "onInBandRing: address " + address + " event " + event);
+        }
+        HeadsetClientService service = HeadsetClientService.getHeadsetClientService();
+        if (service != null) {
+            service.messageFromNative(event);
+        } else {
+            Log.w(TAG,
+                    "onInBandRing: Ignoring message because service not available: " + event);
+        }
     }
 
     private void onLastVoiceTagNumber(String number, byte[] address) {

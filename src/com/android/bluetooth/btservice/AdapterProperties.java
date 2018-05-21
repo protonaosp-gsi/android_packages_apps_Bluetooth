@@ -38,20 +38,34 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.os.ParcelUuid;
+import android.os.SystemProperties;
 import android.os.UserHandle;
+import android.provider.Settings.Secure;
 import android.util.Log;
 import android.util.Pair;
+import android.util.StatsLog;
 
 import com.android.bluetooth.Utils;
 import com.android.bluetooth.btservice.RemoteDevices.DeviceProperties;
 
+import java.io.FileDescriptor;
+import java.io.PrintWriter;
 import java.util.HashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 class AdapterProperties {
     private static final boolean DBG = true;
     private static final boolean VDBG = false;
-    private static final String TAG = "BluetoothAdapterProperties";
+    private static final String TAG = "AdapterProperties";
+
+    private static final String MAX_CONNECTED_AUDIO_DEVICES_PROPERTY =
+            "persist.bluetooth.maxconnectedaudiodevices";
+    static final int MAX_CONNECTED_AUDIO_DEVICES_LOWER_BOND = 1;
+    private static final int MAX_CONNECTED_AUDIO_DEVICES_UPPER_BOUND = 5;
+    private static final String A2DP_OFFLOAD_SUPPORTED_PROPERTY =
+            "ro.bluetooth.a2dp_offload.supported";
+    private static final String A2DP_OFFLOAD_DISABLED_PROPERTY =
+            "persist.bluetooth.a2dp_offload.disabled";
 
     private static final long DEFAULT_DISCOVERY_TIMEOUT_MS = 12800;
     private static final int BD_ADDR_LEN = 6; // in bytes
@@ -62,6 +76,9 @@ class AdapterProperties {
     private volatile int mScanMode;
     private volatile int mDiscoverableTimeout;
     private volatile ParcelUuid[] mUuids;
+    private volatile int mLocalIOCapability = BluetoothAdapter.IO_CAPABILITY_UNKNOWN;
+    private volatile int mLocalIOCapabilityBLE = BluetoothAdapter.IO_CAPABILITY_UNKNOWN;
+
     private CopyOnWriteArrayList<BluetoothDevice> mBondedDevices =
             new CopyOnWriteArrayList<BluetoothDevice>();
 
@@ -71,6 +88,8 @@ class AdapterProperties {
 
     private volatile int mConnectionState = BluetoothAdapter.STATE_DISCONNECTED;
     private volatile int mState = BluetoothAdapter.STATE_OFF;
+    private int mMaxConnectedAudioDevices = 1;
+    private boolean mA2dpOffloadEnabled = false;
 
     private AdapterService mService;
     private boolean mDiscovering;
@@ -164,6 +183,25 @@ class AdapterProperties {
         mProfileConnectionState.clear();
         mRemoteDevices = remoteDevices;
 
+        // Get default max connected audio devices from config.xml in frameworks/base/core
+        int configDefaultMaxConnectedAudioDevices = mService.getResources().getInteger(
+                com.android.internal.R.integer.config_bluetooth_max_connected_audio_devices);
+        // Override max connected audio devices if MAX_CONNECTED_AUDIO_DEVICES_PROPERTY is set
+        int propertyOverlayedMaxConnectedAudioDevices =
+                SystemProperties.getInt(MAX_CONNECTED_AUDIO_DEVICES_PROPERTY,
+                        configDefaultMaxConnectedAudioDevices);
+        // Make sure the final value of max connected audio devices is within allowed range
+        mMaxConnectedAudioDevices = Math.min(Math.max(propertyOverlayedMaxConnectedAudioDevices,
+                MAX_CONNECTED_AUDIO_DEVICES_LOWER_BOND), MAX_CONNECTED_AUDIO_DEVICES_UPPER_BOUND);
+        Log.i(TAG, "init(), maxConnectedAudioDevices, default="
+                + configDefaultMaxConnectedAudioDevices + ", propertyOverlayed="
+                + propertyOverlayedMaxConnectedAudioDevices + ", finalValue="
+                + mMaxConnectedAudioDevices);
+
+        mA2dpOffloadEnabled =
+                SystemProperties.getBoolean(A2DP_OFFLOAD_SUPPORTED_PROPERTY, false)
+                && !SystemProperties.getBoolean(A2DP_OFFLOAD_DISABLED_PROPERTY, false);
+
         IntentFilter filter = new IntentFilter();
         filter.addAction(BluetoothHeadset.ACTION_CONNECTION_STATE_CHANGED);
         filter.addAction(BluetoothHeadsetClient.ACTION_CONNECTION_STATE_CHANGED);
@@ -251,6 +289,45 @@ class AdapterProperties {
         }
     }
 
+    boolean setIoCapability(int capability) {
+        synchronized (mObject) {
+            boolean result = mService.setAdapterPropertyNative(
+                    AbstractionLayer.BT_PROPERTY_LOCAL_IO_CAPS, Utils.intToByteArray(capability));
+
+            if (result) {
+                mLocalIOCapability = capability;
+            }
+
+            return result;
+        }
+    }
+
+    int getIoCapability() {
+        synchronized (mObject) {
+            return mLocalIOCapability;
+        }
+    }
+
+    boolean setLeIoCapability(int capability) {
+        synchronized (mObject) {
+            boolean result = mService.setAdapterPropertyNative(
+                    AbstractionLayer.BT_PROPERTY_LOCAL_IO_CAPS_BLE,
+                    Utils.intToByteArray(capability));
+
+            if (result) {
+                mLocalIOCapabilityBLE = capability;
+            }
+
+            return result;
+        }
+    }
+
+    int getLeIoCapability() {
+        synchronized (mObject) {
+            return mLocalIOCapabilityBLE;
+        }
+    }
+
     /**
      * @return the mScanMode
      */
@@ -285,10 +362,10 @@ class AdapterProperties {
     }
 
     /**
-     * @param mConnectionState the mConnectionState to set
+     * @param connectionState the mConnectionState to set
      */
-    void setConnectionState(int mConnectionState) {
-        this.mConnectionState = mConnectionState;
+    void setConnectionState(int connectionState) {
+        mConnectionState = connectionState;
     }
 
     /**
@@ -301,9 +378,9 @@ class AdapterProperties {
     /**
      * @param mState the mState to set
      */
-    void setState(int mState) {
-        debugLog("Setting state to " + mState);
-        this.mState = mState;
+    void setState(int state) {
+        debugLog("Setting state to " + BluetoothAdapter.nameForState(state));
+        mState = state;
     }
 
     /**
@@ -398,6 +475,20 @@ class AdapterProperties {
     }
 
     /**
+     * @return the maximum number of connected audio devices
+     */
+    int getMaxConnectedAudioDevices() {
+        return mMaxConnectedAudioDevices;
+    }
+
+    /**
+     * @return A2DP offload support
+     */
+    boolean isA2dpOffloadEnabled() {
+        return mA2dpOffloadEnabled;
+    }
+
+    /**
      * @return the mBondedDevices
      */
     BluetoothDevice[] getBondedDevices() {
@@ -482,6 +573,11 @@ class AdapterProperties {
         Log.d(TAG,
                 "PROFILE_CONNECTION_STATE_CHANGE: profile=" + profile + ", device=" + device + ", "
                         + prevState + " -> " + state);
+        String ssaid = Secure.getString(mService.getContentResolver(), Secure.ANDROID_ID);
+        String combined = ssaid + device.getAddress();
+        int obfuscated_id = combined.hashCode() & 0xFFFF; // Last two bytes only
+        StatsLog.write(StatsLog.BLUETOOTH_CONNECTION_STATE_CHANGED,
+                state, obfuscated_id, profile);
         if (!isNormalStateTransition(prevState, state)) {
             Log.w(TAG,
                     "PROFILE_CONNECTION_STATE_CHANGE: unexpected transition for profile=" + profile
@@ -715,10 +811,6 @@ class AdapterProperties {
                         intent.addFlags(Intent.FLAG_RECEIVER_REGISTERED_ONLY_BEFORE_BOOT);
                         mService.sendBroadcast(intent, AdapterService.BLUETOOTH_PERM);
                         debugLog("Scan Mode:" + mScanMode);
-                        if (mBluetoothDisabling) {
-                            mBluetoothDisabling = false;
-                            mService.startBluetoothDisable();
-                        }
                         break;
                     case AbstractionLayer.BT_PROPERTY_UUIDS:
                         mUuids = Utils.byteArrayToUuid(val);
@@ -740,6 +832,16 @@ class AdapterProperties {
 
                     case AbstractionLayer.BT_PROPERTY_LOCAL_LE_FEATURES:
                         updateFeatureSupport(val);
+                        break;
+
+                    case AbstractionLayer.BT_PROPERTY_LOCAL_IO_CAPS:
+                        mLocalIOCapability = Utils.byteArrayToInt(val);
+                        debugLog("mLocalIOCapability set to " + mLocalIOCapability);
+                        break;
+
+                    case AbstractionLayer.BT_PROPERTY_LOCAL_IO_CAPS_BLE:
+                        mLocalIOCapabilityBLE = Utils.byteArrayToInt(val);
+                        debugLog("mLocalIOCapabilityBLE set to " + mLocalIOCapabilityBLE);
                         break;
 
                     default:
@@ -785,7 +887,8 @@ class AdapterProperties {
     }
 
     void onBluetoothReady() {
-        debugLog("onBluetoothReady, state=" + getState() + ", ScanMode=" + mScanMode);
+        debugLog("onBluetoothReady, state=" + BluetoothAdapter.nameForState(getState())
+                + ", ScanMode=" + mScanMode);
 
         synchronized (mObject) {
             // Reset adapter and profile connection states
@@ -794,51 +897,27 @@ class AdapterProperties {
             mProfilesConnected = 0;
             mProfilesConnecting = 0;
             mProfilesDisconnecting = 0;
-            // When BT is being turned on, all adapter properties will be sent in 1
-            // callback. At this stage, set the scan mode.
-            if (getState() == BluetoothAdapter.STATE_TURNING_ON
-                    && mScanMode == BluetoothAdapter.SCAN_MODE_NONE) {
-                    /* mDiscoverableTimeout is part of the
-                       adapterPropertyChangedCallback received before
-                       onBluetoothReady */
-                if (mDiscoverableTimeout != 0) {
-                    setScanMode(AbstractionLayer.BT_SCAN_MODE_CONNECTABLE);
-                } else /* if timeout == never (0) at startup */ {
-                    setScanMode(AbstractionLayer.BT_SCAN_MODE_CONNECTABLE_DISCOVERABLE);
-                }
-                    /* though not always required, this keeps NV up-to date on first-boot after
-                    flash */
-                setDiscoverableTimeout(mDiscoverableTimeout);
-            }
+            // adapterPropertyChangedCallback has already been received.  Set the scan mode.
+            setScanMode(AbstractionLayer.BT_SCAN_MODE_CONNECTABLE);
+            // This keeps NV up-to date on first-boot after flash.
+            setDiscoverableTimeout(mDiscoverableTimeout);
         }
     }
 
-    private boolean mBluetoothDisabling = false;
-
     void onBleDisable() {
         // Sequence BLE_ON to STATE_OFF - that is _complete_ OFF state.
-        // When BT disable is invoked, set the scan_mode to NONE
-        // so no incoming connections are possible
         debugLog("onBleDisable");
-        if (getState() == BluetoothAdapter.STATE_BLE_TURNING_OFF) {
-            setScanMode(AbstractionLayer.BT_SCAN_MODE_NONE);
-        }
+        // Set the scan_mode to NONE (no incoming connections).
+        setScanMode(AbstractionLayer.BT_SCAN_MODE_NONE);
     }
 
     void onBluetoothDisable() {
         // From STATE_ON to BLE_ON
-        // When BT disable is invoked, set the scan_mode to NONE
-        // so no incoming connections are possible
-
-        //Set flag to indicate we are disabling. When property change of scan mode done
-        //continue with disable sequence
         debugLog("onBluetoothDisable()");
-        mBluetoothDisabling = true;
-        if (getState() == BluetoothAdapter.STATE_TURNING_OFF) {
-            // Turn off any Device Search/Inquiry
-            mService.cancelDiscovery();
-            setScanMode(AbstractionLayer.BT_SCAN_MODE_NONE);
-        }
+        // Turn off any Device Search/Inquiry
+        mService.cancelDiscovery();
+        // Set the scan_mode to NONE (no incoming connections).
+        setScanMode(AbstractionLayer.BT_SCAN_MODE_NONE);
     }
 
     void discoveryStateChangeCallback(int state) {
@@ -856,6 +935,70 @@ class AdapterProperties {
                 intent = new Intent(BluetoothAdapter.ACTION_DISCOVERY_STARTED);
                 mService.sendBroadcast(intent, AdapterService.BLUETOOTH_PERM);
             }
+        }
+    }
+
+    protected void dump(FileDescriptor fd, PrintWriter writer, String[] args) {
+        writer.println(TAG);
+        writer.println("  " + "Name: " + getName());
+        writer.println("  " + "Address: " + Utils.getAddressStringFromByte(mAddress));
+        writer.println("  " + "BluetoothClass: " + getBluetoothClass());
+        writer.println("  " + "ScanMode: " + dumpScanMode(getScanMode()));
+        writer.println("  " + "ConnectionState: " + dumpConnectionState(getConnectionState()));
+        writer.println("  " + "State: " + BluetoothAdapter.nameForState(getState()));
+        writer.println("  " + "MaxConnectedAudioDevices: " + getMaxConnectedAudioDevices());
+        writer.println("  " + "A2dpOffloadEnabled: " + mA2dpOffloadEnabled);
+        writer.println("  " + "Discovering: " + mDiscovering);
+        writer.println("  " + "DiscoveryEndMs: " + mDiscoveryEndMs);
+
+        writer.println("  " + "Bonded devices:");
+        for (BluetoothDevice device : mBondedDevices) {
+            writer.println(
+                    "    " + device.getAddress() + " [" + dumpDeviceType(device.getType()) + "] "
+                            + device.getName());
+        }
+    }
+
+    private String dumpDeviceType(int deviceType) {
+        switch (deviceType) {
+            case BluetoothDevice.DEVICE_TYPE_UNKNOWN:
+                return " ???? ";
+            case BluetoothDevice.DEVICE_TYPE_CLASSIC:
+                return "BR/EDR";
+            case BluetoothDevice.DEVICE_TYPE_LE:
+                return "  LE  ";
+            case BluetoothDevice.DEVICE_TYPE_DUAL:
+                return " DUAL ";
+            default:
+                return "Invalid device type: " + deviceType;
+        }
+    }
+
+    private String dumpConnectionState(int state) {
+        switch (state) {
+            case BluetoothAdapter.STATE_DISCONNECTED:
+                return "STATE_DISCONNECTED";
+            case BluetoothAdapter.STATE_DISCONNECTING:
+                return "STATE_DISCONNECTING";
+            case BluetoothAdapter.STATE_CONNECTING:
+                return "STATE_CONNECTING";
+            case BluetoothAdapter.STATE_CONNECTED:
+                return "STATE_CONNECTED";
+            default:
+                return "Unknown Connection State " + state;
+        }
+    }
+
+    private String dumpScanMode(int scanMode) {
+        switch (scanMode) {
+            case BluetoothAdapter.SCAN_MODE_NONE:
+                return "SCAN_MODE_NONE";
+            case BluetoothAdapter.SCAN_MODE_CONNECTABLE:
+                return "SCAN_MODE_CONNECTABLE";
+            case BluetoothAdapter.SCAN_MODE_CONNECTABLE_DISCOVERABLE:
+                return "SCAN_MODE_CONNECTABLE_DISCOVERABLE";
+            default:
+                return "Unknown Scan Mode " + scanMode;
         }
     }
 

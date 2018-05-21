@@ -44,9 +44,11 @@ import android.os.ParcelUuid;
 import android.os.PowerManager;
 import android.util.Log;
 
+import com.android.bluetooth.BluetoothMetricsProto;
 import com.android.bluetooth.Utils;
 import com.android.bluetooth.avrcpcontroller.AvrcpControllerService;
 import com.android.bluetooth.btservice.AdapterService;
+import com.android.bluetooth.btservice.MetricsLogger;
 import com.android.bluetooth.btservice.ProfileService;
 import com.android.internal.util.IState;
 import com.android.internal.util.State;
@@ -304,7 +306,7 @@ public class A2dpSinkStateMachine extends StateMachine {
             boolean retValue = HANDLED;
             switch (message.what) {
                 case CONNECT:
-                    deferMessage(message);
+                    logd("Disconnect before connecting to another target");
                     break;
                 case CONNECT_TIMEOUT:
                     onConnectionStateChanged(getByteAddress(mTargetDevice),
@@ -320,8 +322,6 @@ public class A2dpSinkStateMachine extends StateMachine {
                         synchronized (A2dpSinkStateMachine.this) {
                             mTargetDevice = null;
                         }
-                    } else {
-                        deferMessage(message);
                     }
                     break;
                 case STACK_EVENT:
@@ -516,26 +516,8 @@ public class A2dpSinkStateMachine extends StateMachine {
             }
 
             switch (message.what) {
-                case CONNECT: {
-                    BluetoothDevice device = (BluetoothDevice) message.obj;
-                    if (mCurrentDevice.equals(device)) {
-                        break;
-                    }
-
-                    broadcastConnectionState(device, BluetoothProfile.STATE_CONNECTING,
-                            BluetoothProfile.STATE_DISCONNECTED);
-                    if (!disconnectA2dpNative(getByteAddress(mCurrentDevice))) {
-                        broadcastConnectionState(device, BluetoothProfile.STATE_DISCONNECTED,
-                                BluetoothProfile.STATE_CONNECTING);
-                        break;
-                    }
-
-                    synchronized (A2dpSinkStateMachine.this) {
-                        mTargetDevice = device;
-                        mStreaming.obtainMessage(A2dpSinkStreamHandler.DISCONNECT).sendToTarget();
-                        transitionTo(mPending);
-                    }
-                }
+                case CONNECT:
+                    logd("Disconnect before connecting to another target");
                 break;
 
                 case DISCONNECT: {
@@ -827,6 +809,9 @@ public class A2dpSinkStateMachine extends StateMachine {
     private class IntentBroadcastHandler extends Handler {
 
         private void onConnectionStateChanged(BluetoothDevice device, int prevState, int state) {
+            if (prevState != state && state == BluetoothProfile.STATE_CONNECTED) {
+                MetricsLogger.logProfileConnectionEvent(BluetoothMetricsProto.ProfileId.A2DP_SINK);
+            }
             Intent intent = new Intent(BluetoothA2dpSink.ACTION_CONNECTION_STATE_CHANGED);
             intent.putExtra(BluetoothProfile.EXTRA_PREVIOUS_STATE, prevState);
             intent.putExtra(BluetoothProfile.EXTRA_STATE, state);

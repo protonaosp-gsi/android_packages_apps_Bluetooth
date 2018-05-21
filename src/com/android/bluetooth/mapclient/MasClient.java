@@ -65,7 +65,9 @@ public class MasClient {
     };
     private static final byte OAP_TAGID_MAP_SUPPORTED_FEATURES = 0x29;
     private static final int MAP_FEATURE_NOTIFICATION_REGISTRATION = 0x00000001;
-    private static final int MAP_SUPPORTED_FEATURES = MAP_FEATURE_NOTIFICATION_REGISTRATION;
+    private static final int MAP_FEATURE_NOTIFICATION = 0x00000002;
+    static final int MAP_SUPPORTED_FEATURES =
+            MAP_FEATURE_NOTIFICATION_REGISTRATION | MAP_FEATURE_NOTIFICATION;
 
     private final StateMachine mCallback;
     private Handler mHandler;
@@ -102,7 +104,7 @@ public class MasClient {
                         + mSdpMasRecord.getRfcommCannelNumber());
             }
             mSocket = mRemoteDevice.createRfcommSocket(mSdpMasRecord.getRfcommCannelNumber());
-            Log.d(TAG, mRemoteDevice.toString() + "Socket: " + mSocket.toString());
+            if (DBG) Log.d(TAG, mRemoteDevice.toString() + "Socket: " + mSocket.toString());
             mSocket.connect();
             mTransport = new BluetoothObexTransport(mSocket);
 
@@ -116,14 +118,14 @@ public class MasClient {
             oap.addToHeaderSet(headerset);
 
             headerset = mSession.connect(headerset);
-            Log.d(TAG, "Connection results" + headerset.getResponseCode());
+            if (DBG) Log.d(TAG, "Connection results" + headerset.getResponseCode());
 
             if (headerset.getResponseCode() == ResponseCodes.OBEX_HTTP_OK) {
                 if (DBG) {
                     Log.d(TAG, "Connection Successful");
                 }
                 mConnected = true;
-                mCallback.obtainMessage(MceStateMachine.MSG_MAS_CONNECTED).sendToTarget();
+                mCallback.sendMessage(MceStateMachine.MSG_MAS_CONNECTED);
             } else {
                 disconnect();
             }
@@ -150,14 +152,13 @@ public class MasClient {
         }
 
         mConnected = false;
-        mCallback.obtainMessage(MceStateMachine.MSG_MAS_DISCONNECTED).sendToTarget();
+        mCallback.sendMessage(MceStateMachine.MSG_MAS_DISCONNECTED);
     }
 
     private void executeRequest(Request request) {
         try {
             request.execute(mSession);
-            mCallback.obtainMessage(MceStateMachine.MSG_MAS_REQUEST_COMPLETED, request)
-                    .sendToTarget();
+            mCallback.sendMessage(MceStateMachine.MSG_MAS_REQUEST_COMPLETED, request);
         } catch (IOException e) {
             if (DBG) {
                 Log.d(TAG, "Request failed: " + request);
@@ -200,22 +201,23 @@ public class MasClient {
         @Override
         public void handleMessage(Message msg) {
             MasClient inst = mInst.get();
-            if (!inst.mConnected && msg.what != CONNECT) {
-                Log.w(TAG, "Cannot execute " + msg + " when not CONNECTED.");
-                return;
-            }
-
             switch (msg.what) {
                 case CONNECT:
-                    inst.connect();
+                    if (!inst.mConnected) {
+                        inst.connect();
+                    }
                     break;
 
                 case DISCONNECT:
-                    inst.disconnect();
+                    if (inst.mConnected) {
+                        inst.disconnect();
+                    }
                     break;
 
                 case REQUEST:
-                    inst.executeRequest((Request) msg.obj);
+                    if (inst.mConnected) {
+                        inst.executeRequest((Request) msg.obj);
+                    }
                     break;
             }
         }

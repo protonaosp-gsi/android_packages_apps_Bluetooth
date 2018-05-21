@@ -32,7 +32,7 @@ static jmethodID method_onConnectStateChanged;
 static jmethodID method_onGetReport;
 static jmethodID method_onSetReport;
 static jmethodID method_onSetProtocol;
-static jmethodID method_onIntrData;
+static jmethodID method_onInterruptData;
 static jmethodID method_onVirtualCableUnplug;
 
 static const bthd_interface_t* sHiddIf = NULL;
@@ -132,7 +132,7 @@ static void intr_data_callback(uint8_t report_id, uint16_t len,
   }
   sCallbackEnv->SetByteArrayRegion(data.get(), 0, len, (jbyte*)p_data);
 
-  sCallbackEnv->CallVoidMethod(mCallbacksObj, method_onIntrData,
+  sCallbackEnv->CallVoidMethod(mCallbacksObj, method_onInterruptData,
                                (jbyte)report_id, data.get());
 }
 
@@ -163,7 +163,7 @@ static void classInitNative(JNIEnv* env, jclass clazz) {
   method_onGetReport = env->GetMethodID(clazz, "onGetReport", "(BBS)V");
   method_onSetReport = env->GetMethodID(clazz, "onSetReport", "(BB[B)V");
   method_onSetProtocol = env->GetMethodID(clazz, "onSetProtocol", "(B)V");
-  method_onIntrData = env->GetMethodID(clazz, "onIntrData", "(B[B)V");
+  method_onInterruptData = env->GetMethodID(clazz, "onInterruptData", "(B[B)V");
   method_onVirtualCableUnplug =
       env->GetMethodID(clazz, "onVirtualCableUnplug", "()V");
 }
@@ -261,6 +261,11 @@ static jboolean registerAppNative(JNIEnv* env, jobject thiz, jstring name,
                                   jintArray p_in_qos, jintArray p_out_qos) {
   ALOGV("%s enter", __FUNCTION__);
 
+  if (!sHiddIf) {
+    ALOGE("%s: Failed to get the Bluetooth HIDD Interface", __func__);
+    return JNI_FALSE;
+  }
+
   jboolean result = JNI_FALSE;
   bthd_app_param_t app_param;
   bthd_qos_param_t in_qos;
@@ -309,6 +314,11 @@ static jboolean unregisterAppNative(JNIEnv* env, jobject thiz) {
 
   jboolean result = JNI_FALSE;
 
+  if (!sHiddIf) {
+    ALOGE("%s: Failed to get the Bluetooth HIDD Interface", __func__);
+    return JNI_FALSE;
+  }
+
   bt_status_t ret = sHiddIf->unregister_app();
 
   ALOGV("%s: unregister_app() returned %d", __FUNCTION__, ret);
@@ -325,6 +335,12 @@ static jboolean unregisterAppNative(JNIEnv* env, jobject thiz) {
 static jboolean sendReportNative(JNIEnv* env, jobject thiz, jint id,
                                  jbyteArray data) {
   jboolean result = JNI_FALSE;
+
+  if (!sHiddIf) {
+    ALOGE("%s: Failed to get the Bluetooth HIDD Interface", __func__);
+    return JNI_FALSE;
+  }
+
   jsize size;
   uint8_t* buf;
 
@@ -350,6 +366,11 @@ static jboolean sendReportNative(JNIEnv* env, jobject thiz, jint id,
 static jboolean replyReportNative(JNIEnv* env, jobject thiz, jbyte type,
                                   jbyte id, jbyteArray data) {
   ALOGV("%s enter", __FUNCTION__);
+
+  if (!sHiddIf) {
+    ALOGE("%s: Failed to get the Bluetooth HIDD Interface", __func__);
+    return JNI_FALSE;
+  }
 
   jboolean result = JNI_FALSE;
   jsize size;
@@ -382,6 +403,11 @@ static jboolean replyReportNative(JNIEnv* env, jobject thiz, jbyte type,
 static jboolean reportErrorNative(JNIEnv* env, jobject thiz, jbyte error) {
   ALOGV("%s enter", __FUNCTION__);
 
+  if (!sHiddIf) {
+    ALOGE("%s: Failed to get the Bluetooth HIDD Interface", __func__);
+    return JNI_FALSE;
+  }
+
   jboolean result = JNI_FALSE;
 
   bt_status_t ret = sHiddIf->report_error(error);
@@ -400,6 +426,11 @@ static jboolean reportErrorNative(JNIEnv* env, jobject thiz, jbyte error) {
 static jboolean unplugNative(JNIEnv* env, jobject thiz) {
   ALOGV("%s enter", __FUNCTION__);
 
+  if (!sHiddIf) {
+    ALOGE("%s: Failed to get the Bluetooth HIDD Interface", __func__);
+    return JNI_FALSE;
+  }
+
   jboolean result = JNI_FALSE;
 
   bt_status_t ret = sHiddIf->virtual_cable_unplug();
@@ -417,6 +448,11 @@ static jboolean unplugNative(JNIEnv* env, jobject thiz) {
 
 static jboolean connectNative(JNIEnv* env, jobject thiz, jbyteArray address) {
   ALOGV("%s enter", __FUNCTION__);
+
+  if (!sHiddIf) {
+    ALOGE("%s: Failed to get the Bluetooth HIDD Interface", __func__);
+    return JNI_FALSE;
+  }
 
   jboolean result = JNI_FALSE;
 
@@ -441,6 +477,11 @@ static jboolean connectNative(JNIEnv* env, jobject thiz, jbyteArray address) {
 
 static jboolean disconnectNative(JNIEnv* env, jobject thiz) {
   ALOGV("%s enter", __FUNCTION__);
+
+  if (!sHiddIf) {
+    ALOGE("%s: Failed to get the Bluetooth HIDD Interface", __func__);
+    return JNI_FALSE;
+  }
 
   jboolean result = JNI_FALSE;
 
