@@ -27,12 +27,14 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.Message;
 import android.provider.CallLog;
+import android.provider.CallLog.Calls;
 import android.util.Log;
 
 import com.android.bluetooth.BluetoothObexTransport;
 import com.android.bluetooth.R;
 
 import java.io.IOException;
+import java.util.HashMap;
 
 import javax.obex.ClientSession;
 import javax.obex.HeaderSet;
@@ -44,8 +46,9 @@ import javax.obex.ResponseCodes;
  * controlling state machine.
  */
 class PbapClientConnectionHandler extends Handler {
-    static final String TAG = "PBAP PCE handler";
-    static final boolean DBG = true;
+    static final String TAG = "PbapClientConnHandler";
+    static final boolean DBG = Utils.DBG;
+    static final boolean VDBG = Utils.VDBG;
     static final int MSG_CONNECT = 1;
     static final int MSG_DISCONNECT = 2;
     static final int MSG_DOWNLOAD = 3;
@@ -88,7 +91,7 @@ class PbapClientConnectionHandler extends Handler {
             PBAP_FEATURE_DEFAULT_IMAGE_FORMAT | PBAP_FEATURE_BROWSING | PBAP_FEATURE_DOWNLOADING;
     private static final long PBAP_REQUESTED_FIELDS =
             PBAP_FILTER_VERSION | PBAP_FILTER_FN | PBAP_FILTER_N | PBAP_FILTER_PHOTO
-                    | PBAP_FILTER_ADR | PBAP_FILTER_TEL | PBAP_FILTER_NICKNAME;
+                    | PBAP_FILTER_ADR | PBAP_FILTER_EMAIL | PBAP_FILTER_TEL | PBAP_FILTER_NICKNAME;
     private static final int PBAP_V1_2 = 0x0102;
     private static final int L2CAP_INVALID_PSM = -1;
 
@@ -96,6 +99,7 @@ class PbapClientConnectionHandler extends Handler {
     public static final String MCH_PATH = "telecom/mch.vcf";
     public static final String ICH_PATH = "telecom/ich.vcf";
     public static final String OCH_PATH = "telecom/och.vcf";
+
     public static final byte VCARD_TYPE_21 = 0;
     public static final byte VCARD_TYPE_30 = 1;
 
@@ -229,9 +233,10 @@ class PbapClientConnectionHandler extends Handler {
                     Log.d(TAG, "Completing Disconnect");
                 }
                 removeAccount(mAccount);
-                mContext.getContentResolver().delete(CallLog.Calls.CONTENT_URI, null, null);
+                removeCallLog(mAccount);
+
                 mPbapClientStateMachine.obtainMessage(PbapClientStateMachine.MSG_CONNECTION_CLOSED)
-                        .sendToTarget();
+                    .sendToTarget();
                 break;
 
             case MSG_DOWNLOAD:
@@ -251,10 +256,10 @@ class PbapClientConnectionHandler extends Handler {
                                     mAccount);
                     processor.setResults(request.getList());
                     processor.onPullComplete();
-
-                    downloadCallLog(MCH_PATH);
-                    downloadCallLog(ICH_PATH);
-                    downloadCallLog(OCH_PATH);
+                    HashMap<String, Integer> callCounter = new HashMap<>();
+                    downloadCallLog(MCH_PATH, callCounter);
+                    downloadCallLog(ICH_PATH, callCounter);
+                    downloadCallLog(OCH_PATH, callCounter);
                 } catch (IOException e) {
                     Log.w(TAG, "DOWNLOAD_CONTACTS Failure" + e.toString());
                 }
@@ -273,14 +278,14 @@ class PbapClientConnectionHandler extends Handler {
             /* Use BluetoothSocket to connect */
             if (mPseRec == null) {
                 // BackWardCompatability: Fall back to create RFCOMM through UUID.
-                Log.v(TAG, "connectSocket: UUID: " + BluetoothUuid.PBAP_PSE.getUuid());
+                if (VDBG) Log.v(TAG, "connectSocket: UUID: " + BluetoothUuid.PBAP_PSE.getUuid());
                 mSocket =
                         mDevice.createRfcommSocketToServiceRecord(BluetoothUuid.PBAP_PSE.getUuid());
             } else if (mPseRec.getL2capPsm() != L2CAP_INVALID_PSM) {
-                Log.v(TAG, "connectSocket: PSM: " + mPseRec.getL2capPsm());
+                if (VDBG) Log.v(TAG, "connectSocket: PSM: " + mPseRec.getL2capPsm());
                 mSocket = mDevice.createL2capSocket(mPseRec.getL2capPsm());
             } else {
-                Log.v(TAG, "connectSocket: channel: " + mPseRec.getRfcommChannelNumber());
+                if (VDBG) Log.v(TAG, "connectSocket: channel: " + mPseRec.getRfcommChannelNumber());
                 mSocket = mDevice.createRfcommSocket(mPseRec.getRfcommChannelNumber());
             }
 
@@ -302,7 +307,7 @@ class PbapClientConnectionHandler extends Handler {
         boolean connectionSuccessful = false;
 
         try {
-            if (DBG) {
+            if (VDBG) {
                 Log.v(TAG, "Start Obex Client Session");
             }
             BluetoothObexTransport transport = new BluetoothObexTransport(mSocket);
@@ -362,13 +367,14 @@ class PbapClientConnectionHandler extends Handler {
         }
     }
 
-    void downloadCallLog(String path) {
+    void downloadCallLog(String path, HashMap<String, Integer> callCounter) {
         try {
             BluetoothPbapRequestPullPhoneBook request =
                     new BluetoothPbapRequestPullPhoneBook(path, mAccount, 0, VCARD_TYPE_30, 0, 0);
             request.execute(mObexSession);
             CallLogPullRequest processor =
-                    new CallLogPullRequest(mPbapClientStateMachine.getContext(), path);
+                    new CallLogPullRequest(mPbapClientStateMachine.getContext(), path,
+                        callCounter, mAccount);
             processor.setResults(request.getList());
             processor.onPullComplete();
         } catch (IOException e) {
@@ -386,13 +392,29 @@ class PbapClientConnectionHandler extends Handler {
         return false;
     }
 
-    private void removeAccount(Account acc) {
-        if (mAccountManager.removeAccountExplicitly(acc)) {
+    private void removeAccount(Account account) {
+        if (mAccountManager.removeAccountExplicitly(account)) {
             if (DBG) {
-                Log.d(TAG, "Removed account " + acc);
+                Log.d(TAG, "Removed account " + account);
             }
         } else {
             Log.e(TAG, "Failed to remove account " + mAccount);
+        }
+    }
+
+    private void removeCallLog(Account account) {
+        try {
+            // need to check call table is exist ?
+            if (mContext.getContentResolver() == null) {
+                if (DBG) {
+                    Log.d(TAG, "CallLog ContentResolver is not found");
+                }
+                return;
+            }
+            String where = Calls.PHONE_ACCOUNT_ID + "=" + account.hashCode();
+            mContext.getContentResolver().delete(CallLog.Calls.CONTENT_URI, where, null);
+        } catch (IllegalArgumentException e) {
+            Log.d(TAG, "Call Logs could not be deleted, they may not exist yet.");
         }
     }
 }

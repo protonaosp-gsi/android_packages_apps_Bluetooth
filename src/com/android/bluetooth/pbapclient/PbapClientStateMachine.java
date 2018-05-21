@@ -56,6 +56,8 @@ import android.os.Process;
 import android.os.UserManager;
 import android.util.Log;
 
+import com.android.bluetooth.BluetoothMetricsProto;
+import com.android.bluetooth.btservice.MetricsLogger;
 import com.android.bluetooth.btservice.ProfileService;
 import com.android.internal.util.IState;
 import com.android.internal.util.State;
@@ -65,7 +67,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 final class PbapClientStateMachine extends StateMachine {
-    private static final boolean DBG = true;
+    private static final boolean DBG = Utils.DBG;
     private static final String TAG = "PbapClientStateMachine";
 
     // Messages for handling connect/disconnect requests.
@@ -124,7 +126,7 @@ final class PbapClientStateMachine extends StateMachine {
     class Disconnected extends State {
         @Override
         public void enter() {
-            Log.d(TAG, "Enter Disconnected: " + getCurrentMessage().what);
+            if (DBG) Log.d(TAG, "Enter Disconnected: " + getCurrentMessage().what);
             onConnectionStateChanged(mCurrentDevice, mMostRecentState,
                     BluetoothProfile.STATE_DISCONNECTED);
             mMostRecentState = BluetoothProfile.STATE_DISCONNECTED;
@@ -222,8 +224,6 @@ final class PbapClientStateMachine extends StateMachine {
                     ParcelUuid uuid = intent.getParcelableExtra(BluetoothDevice.EXTRA_UUID);
                     if (DBG) {
                         Log.v(TAG, "Received UUID: " + uuid.toString());
-                    }
-                    if (DBG) {
                         Log.v(TAG, "expected UUID: " + BluetoothUuid.PBAP_PSE.toString());
                     }
                     if (uuid.equals(BluetoothUuid.PBAP_PSE)) {
@@ -248,7 +248,7 @@ final class PbapClientStateMachine extends StateMachine {
     class Disconnecting extends State {
         @Override
         public void enter() {
-            Log.d(TAG, "Enter Disconnecting: " + getCurrentMessage().what);
+            if (DBG) Log.d(TAG, "Enter Disconnecting: " + getCurrentMessage().what);
             onConnectionStateChanged(mCurrentDevice, mMostRecentState,
                     BluetoothProfile.STATE_DISCONNECTING);
             mMostRecentState = BluetoothProfile.STATE_DISCONNECTING;
@@ -293,7 +293,7 @@ final class PbapClientStateMachine extends StateMachine {
     class Connected extends State {
         @Override
         public void enter() {
-            Log.d(TAG, "Enter Connected: " + getCurrentMessage().what);
+            if (DBG) Log.d(TAG, "Enter Connected: " + getCurrentMessage().what);
             onConnectionStateChanged(mCurrentDevice, mMostRecentState,
                     BluetoothProfile.STATE_CONNECTED);
             mMostRecentState = BluetoothProfile.STATE_CONNECTED;
@@ -334,6 +334,9 @@ final class PbapClientStateMachine extends StateMachine {
             Log.w(TAG, "onConnectionStateChanged with invalid device");
             return;
         }
+        if (prevState != state && state == BluetoothProfile.STATE_CONNECTED) {
+            MetricsLogger.logProfileConnectionEvent(BluetoothMetricsProto.ProfileId.PBAP_CLIENT);
+        }
         Log.d(TAG, "Connection state " + device + ": " + prevState + "->" + state);
         Intent intent = new Intent(BluetoothPbapClient.ACTION_CONNECTION_STATE_CHANGED);
         intent.putExtra(BluetoothProfile.EXTRA_PREVIOUS_STATE, prevState);
@@ -344,7 +347,7 @@ final class PbapClientStateMachine extends StateMachine {
     }
 
     public void disconnect(BluetoothDevice device) {
-        Log.d(TAG, "Disconnect Request " + device);
+        if (DBG) Log.d(TAG, "Disconnect Request " + device);
         sendMessage(MSG_DISCONNECT, device);
     }
 

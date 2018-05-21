@@ -40,7 +40,11 @@ import android.os.Message;
 import android.os.PowerManager;
 import android.os.PowerManager.WakeLock;
 import android.os.Process;
+import android.os.SystemClock;
 import android.util.Log;
+
+import com.android.bluetooth.BluetoothMetricsProto;
+import com.android.bluetooth.btservice.MetricsLogger;
 
 import java.io.BufferedInputStream;
 import java.io.IOException;
@@ -73,6 +77,8 @@ public class BluetoothOppObexClientSession implements BluetoothOppObexSession {
     private volatile boolean mWaitingForRemote;
 
     private Handler mCallback;
+
+    private int mNumFilesAttemptedToSend;
 
     public BluetoothOppObexClientSession(Context context, ObexTransport transport) {
         if (transport == null) {
@@ -193,6 +199,7 @@ public class BluetoothOppObexClientSession implements BluetoothOppObexSession {
                 connect(mNumShares);
             }
 
+            mNumFilesAttemptedToSend = 0;
             while (!mInterrupted) {
                 if (!mWaitingForShare) {
                     doSend();
@@ -215,6 +222,11 @@ public class BluetoothOppObexClientSession implements BluetoothOppObexSession {
                     Log.v(TAG, "release partial WakeLock");
                 }
                 mWakeLock.release();
+            }
+
+            if (mNumFilesAttemptedToSend > 0) {
+                // Log outgoing OPP transfer if more than one file is accepted by remote
+                MetricsLogger.logProfileConnectionEvent(BluetoothMetricsProto.ProfileId.OPP);
             }
             Message msg = Message.obtain(mCallback);
             msg.what = BluetoothOppObexSession.MSG_SESSION_COMPLETE;
@@ -440,6 +452,8 @@ public class BluetoothOppObexClientSession implements BluetoothOppObexSession {
                     long prevPercent = 0;
                     boolean okToProceed = false;
                     long timestamp = 0;
+                    long currentTime = 0;
+                    long prevTimestamp = SystemClock.elapsedRealtime();
                     int outputBufferSize = putOperation.getMaxPacketSize();
                     byte[] buffer = new byte[outputBufferSize];
                     BufferedInputStream a = new BufferedInputStream(fileInfo.mInputStream, 0x4000);
@@ -484,6 +498,7 @@ public class BluetoothOppObexClientSession implements BluetoothOppObexSession {
                             updateValues.put(BluetoothShare.CURRENT_BYTES, position);
                             mContext1.getContentResolver()
                                     .update(contentUri, updateValues, null, null);
+                            mNumFilesAttemptedToSend++;
                         } else {
                             Log.i(TAG, "Remote reject, Response code is " + responseCode);
                         }
@@ -491,7 +506,7 @@ public class BluetoothOppObexClientSession implements BluetoothOppObexSession {
 
                     while (!mInterrupted && okToProceed && (position < fileInfo.mLength)) {
                         if (V) {
-                            timestamp = System.currentTimeMillis();
+                            timestamp = SystemClock.elapsedRealtime();
                         }
 
                         readLength = a.read(buffer, 0, outputBufferSize);
@@ -508,19 +523,23 @@ public class BluetoothOppObexClientSession implements BluetoothOppObexSession {
                             okToProceed = false;
                         } else {
                             position += readLength;
+                            currentTime = SystemClock.elapsedRealtime();
                             if (V) {
-                                Log.v(TAG, "Sending file position = " + position + " readLength "
-                                        + readLength + " bytes took " + (System.currentTimeMillis()
-                                        - timestamp) + " ms");
+                                Log.v(TAG, "Sending file position = " + position
+                                        + " readLength " + readLength + " bytes took "
+                                        + (currentTime - timestamp) + " ms");
                             }
                             // Update the Progress Bar only if there is change in percentage
+                            // or once per a period to notify NFC of this transfer is still alive
                             percent = position * 100 / fileInfo.mLength;
-                            if (percent > prevPercent) {
+                            if (percent > prevPercent
+                                    || currentTime - prevTimestamp > Constants.NFC_ALIVE_CHECK_MS) {
                                 updateValues = new ContentValues();
                                 updateValues.put(BluetoothShare.CURRENT_BYTES, position);
                                 mContext1.getContentResolver()
                                         .update(contentUri, updateValues, null, null);
                                 prevPercent = percent;
+                                prevTimestamp = currentTime;
                             }
                         }
                     }

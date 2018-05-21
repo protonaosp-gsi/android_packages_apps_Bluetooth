@@ -24,6 +24,7 @@ import android.bluetooth.le.ScanCallback;
 import android.bluetooth.le.ScanFilter;
 import android.bluetooth.le.ScanSettings;
 import android.content.BroadcastReceiver;
+import android.content.ContentResolver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
@@ -34,6 +35,7 @@ import android.os.Looper;
 import android.os.Message;
 import android.os.RemoteException;
 import android.os.SystemClock;
+import android.provider.Settings;
 import android.util.Log;
 import android.view.Display;
 
@@ -468,8 +470,8 @@ public class ScanManager {
         /**
          * Scan params corresponding to regular scan setting
          */
-        private static final int SCAN_MODE_LOW_POWER_WINDOW_MS = 1024;
-        private static final int SCAN_MODE_LOW_POWER_INTERVAL_MS = 10240;
+        private static final int SCAN_MODE_LOW_POWER_WINDOW_MS = 512;
+        private static final int SCAN_MODE_LOW_POWER_INTERVAL_MS = 5120;
         private static final int SCAN_MODE_BALANCED_WINDOW_MS = 1024;
         private static final int SCAN_MODE_BALANCED_INTERVAL_MS = 4096;
         private static final int SCAN_MODE_LOW_LATENCY_WINDOW_MS = 4096;
@@ -928,11 +930,11 @@ public class ScanManager {
                     queue.addScanFilter(filter);
                     int featureSelection = queue.getFeatureSelection();
                     int filterIndex = mFilterIndexStack.pop();
-                    while (!queue.isEmpty()) {
-                        resetCountDownLatch();
-                        addFilterToController(scannerId, queue.pop(), filterIndex);
-                        waitForCallback();
-                    }
+
+                    resetCountDownLatch();
+                    gattClientScanFilterAddNative(scannerId, queue.toArray(), filterIndex);
+                    waitForCallback();
+
                     resetCountDownLatch();
                     if (deliveryMode == DELIVERY_MODE_ON_FOUND_LOST) {
                         trackEntries = getNumOfTrackingAdvertisements(client.settings);
@@ -1039,55 +1041,6 @@ public class ScanManager {
             return client.filters.size() > mFilterIndexStack.size();
         }
 
-        private void addFilterToController(int scannerId, ScanFilterQueue.Entry entry,
-                int filterIndex) {
-            if (DBG) {
-                Log.d(TAG, "addFilterToController: " + entry.type);
-            }
-            switch (entry.type) {
-                case ScanFilterQueue.TYPE_DEVICE_ADDRESS:
-                    if (DBG) {
-                        Log.d(TAG, "add address " + entry.address);
-                    }
-                    gattClientScanFilterAddNative(scannerId, entry.type, filterIndex, 0, 0, 0, 0, 0,
-                            0, "", entry.address, (byte) entry.addr_type, new byte[0], new byte[0]);
-                    break;
-
-                case ScanFilterQueue.TYPE_SERVICE_DATA:
-                    gattClientScanFilterAddNative(scannerId, entry.type, filterIndex, 0, 0, 0, 0, 0,
-                            0, "", "", (byte) 0, entry.data, entry.data_mask);
-                    break;
-
-                case ScanFilterQueue.TYPE_SERVICE_UUID:
-                case ScanFilterQueue.TYPE_SOLICIT_UUID:
-                    gattClientScanFilterAddNative(scannerId, entry.type, filterIndex, 0, 0,
-                            entry.uuid.getLeastSignificantBits(),
-                            entry.uuid.getMostSignificantBits(),
-                            entry.uuid_mask.getLeastSignificantBits(),
-                            entry.uuid_mask.getMostSignificantBits(), "", "", (byte) 0, new byte[0],
-                            new byte[0]);
-                    break;
-
-                case ScanFilterQueue.TYPE_LOCAL_NAME:
-                    if (DBG) {
-                        Log.d(TAG, "adding filters: " + entry.name);
-                    }
-                    gattClientScanFilterAddNative(scannerId, entry.type, filterIndex, 0, 0, 0, 0, 0,
-                            0, entry.name, "", (byte) 0, new byte[0], new byte[0]);
-                    break;
-
-                case ScanFilterQueue.TYPE_MANUFACTURER_DATA:
-                    int len = entry.data.length;
-                    if (entry.data_mask.length != len) {
-                        return;
-                    }
-                    gattClientScanFilterAddNative(scannerId, entry.type, filterIndex, entry.company,
-                            entry.company_mask, 0, 0, 0, 0, "", "", (byte) 0, entry.data,
-                            entry.data_mask);
-                    break;
-            }
-        }
-
         private void initFilterIndexStack() {
             int maxFiltersSupported =
                     AdapterService.getAdapterService().getNumOfOffloadedScanFilterSupported();
@@ -1139,34 +1092,67 @@ public class ScanManager {
         }
 
         private int getScanWindowMillis(ScanSettings settings) {
+            ContentResolver resolver = mService.getContentResolver();
             if (settings == null) {
-                return SCAN_MODE_LOW_POWER_WINDOW_MS;
+                return Settings.Global.getInt(
+                    resolver,
+                    Settings.Global.BLE_SCAN_LOW_POWER_WINDOW_MS,
+                    SCAN_MODE_LOW_POWER_WINDOW_MS);
             }
+
             switch (settings.getScanMode()) {
                 case ScanSettings.SCAN_MODE_LOW_LATENCY:
-                    return SCAN_MODE_LOW_LATENCY_WINDOW_MS;
+                    return Settings.Global.getInt(
+                        resolver,
+                        Settings.Global.BLE_SCAN_LOW_LATENCY_WINDOW_MS,
+                        SCAN_MODE_LOW_LATENCY_WINDOW_MS);
                 case ScanSettings.SCAN_MODE_BALANCED:
-                    return SCAN_MODE_BALANCED_WINDOW_MS;
+                    return Settings.Global.getInt(
+                        resolver,
+                        Settings.Global.BLE_SCAN_BALANCED_WINDOW_MS,
+                        SCAN_MODE_BALANCED_WINDOW_MS);
                 case ScanSettings.SCAN_MODE_LOW_POWER:
-                    return SCAN_MODE_LOW_POWER_WINDOW_MS;
+                    return Settings.Global.getInt(
+                        resolver,
+                        Settings.Global.BLE_SCAN_LOW_POWER_WINDOW_MS,
+                        SCAN_MODE_LOW_POWER_WINDOW_MS);
                 default:
-                    return SCAN_MODE_LOW_POWER_WINDOW_MS;
+                    return Settings.Global.getInt(
+                        resolver,
+                        Settings.Global.BLE_SCAN_LOW_POWER_WINDOW_MS,
+                        SCAN_MODE_LOW_POWER_WINDOW_MS);
             }
         }
 
         private int getScanIntervalMillis(ScanSettings settings) {
+            ContentResolver resolver = mService.getContentResolver();
             if (settings == null) {
-                return SCAN_MODE_LOW_POWER_INTERVAL_MS;
+                return Settings.Global.getInt(
+                    resolver,
+                    Settings.Global.BLE_SCAN_LOW_POWER_INTERVAL_MS,
+                    SCAN_MODE_LOW_POWER_INTERVAL_MS);
             }
             switch (settings.getScanMode()) {
                 case ScanSettings.SCAN_MODE_LOW_LATENCY:
-                    return SCAN_MODE_LOW_LATENCY_INTERVAL_MS;
+                    return Settings.Global.getInt(
+                        resolver,
+                        Settings.Global.BLE_SCAN_LOW_LATENCY_INTERVAL_MS,
+                        SCAN_MODE_LOW_LATENCY_INTERVAL_MS);
                 case ScanSettings.SCAN_MODE_BALANCED:
-                    return SCAN_MODE_BALANCED_INTERVAL_MS;
+                    return Settings.Global.getInt(
+                        resolver,
+                        Settings.Global.BLE_SCAN_BALANCED_INTERVAL_MS,
+                        SCAN_MODE_BALANCED_INTERVAL_MS);
                 case ScanSettings.SCAN_MODE_LOW_POWER:
-                    return SCAN_MODE_LOW_POWER_INTERVAL_MS;
+                    return Settings.Global.getInt(
+                        resolver,
+                        Settings.Global.BLE_SCAN_LOW_POWER_INTERVAL_MS,
+                        SCAN_MODE_LOW_POWER_INTERVAL_MS);
                 default:
-                    return SCAN_MODE_LOW_POWER_INTERVAL_MS;
+                    return Settings.Global.getInt(
+                        resolver,
+                        Settings.Global.BLE_SCAN_LOW_POWER_INTERVAL_MS,
+                        SCAN_MODE_LOW_POWER_INTERVAL_MS);
             }
         }
 
@@ -1264,10 +1250,8 @@ public class ScanManager {
                 int scanWindow);
 
         /************************** Filter related native methods ********************************/
-        private native void gattClientScanFilterAddNative(int clientIf, int filterType,
-                int filterIndex, int companyId, int companyIdMask, long uuidLsb, long uuidMsb,
-                long uuidMaskLsb, long uuidMaskMsb, String name, String address, byte addrType,
-                byte[] data, byte[] mask);
+        private native void gattClientScanFilterAddNative(int clientId,
+                ScanFilterQueue.Entry[] entries, int filterIndex);
 
         private native void gattClientScanFilterParamAddNative(FilterParams filtValue);
 
@@ -1356,12 +1340,17 @@ public class ScanManager {
                 }
             }
         } else {
+            ContentResolver resolver = mService.getContentResolver();
+            int backgroundScanMode = Settings.Global.getInt(
+                    resolver,
+                    Settings.Global.BLE_SCAN_BACKGROUND_MODE,
+                    ScanSettings.SCAN_MODE_LOW_POWER);
             for (ScanClient client : mRegularScanClients) {
                 if (client.appUid == uid && !mScanNative.isOpportunisticScanClient(client)) {
                     client.passiveSettings = client.settings;
                     ScanSettings.Builder builder = new ScanSettings.Builder();
                     ScanSettings settings = client.settings;
-                    builder.setScanMode(ScanSettings.SCAN_MODE_LOW_POWER);
+                    builder.setScanMode(backgroundScanMode);
                     builder.setCallbackType(settings.getCallbackType());
                     builder.setScanResultType(settings.getScanResultType());
                     builder.setReportDelay(settings.getReportDelayMillis());

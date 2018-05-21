@@ -31,7 +31,10 @@ import java.io.IOException;
 
 import javax.obex.ServerSession;
 
-class MnsService {
+/**
+ * Message Notification Server implementation
+ */
+public class MnsService {
     static final int MSG_EVENT = 1;
     /* for Client */
     static final int EVENT_REPORT = 1001;
@@ -40,8 +43,6 @@ class MnsService {
     private static final Boolean VDBG = MapClientService.VDBG;
     /* MAP version 1.1 */
     private static final int MNS_VERSION = 0x0101;
-    /* MNS features: Notification Feature */
-    private static final int MNS_FEATURE_BITS = 0x0002;
     /* these are shared across instances */
     private static SocketAcceptor sAcceptThread = null;
     private static Handler sSessionHandler = null;
@@ -65,7 +66,8 @@ class MnsService {
             return;
         }
         mSdpHandle = sdpManager.createMapMnsRecord("MAP Message Notification Service",
-                sServerSockets.getRfcommChannel(), -1, MNS_VERSION, MNS_FEATURE_BITS);
+                sServerSockets.getRfcommChannel(), -1, MNS_VERSION,
+                MasClient.MAP_SUPPORTED_FEATURES);
     }
 
     void stop() {
@@ -122,7 +124,13 @@ class MnsService {
                 Log.d(TAG, "onConnect" + device + " SOCKET: " + socket);
             }
             /* Signal to the service that we have received an incoming connection.*/
-            MnsObexServer srv = new MnsObexServer(sContext.mMceStateMachine, sServerSockets);
+            MceStateMachine stateMachine = sContext.getMceStateMachineForDevice(device);
+            if (stateMachine == null) {
+                Log.e(TAG, "Error: NO statemachine for device: " + device.getAddress()
+                        + " (name: " + device.getName());
+                return false;
+            }
+            MnsObexServer srv = new MnsObexServer(stateMachine, sServerSockets);
             BluetoothObexTransport transport = new BluetoothObexTransport(socket);
             try {
                 new ServerSession(transport, srv, null);

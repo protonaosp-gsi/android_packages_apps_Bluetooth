@@ -28,9 +28,12 @@ import android.os.Looper;
 import android.os.Message;
 import android.os.ParcelFileDescriptor;
 import android.os.RemoteException;
+import android.support.annotation.VisibleForTesting;
 import android.util.Log;
 
+import com.android.bluetooth.BluetoothMetricsProto;
 import com.android.bluetooth.Utils;
+import com.android.bluetooth.btservice.MetricsLogger;
 import com.android.bluetooth.btservice.ProfileService;
 
 import java.io.FileDescriptor;
@@ -67,13 +70,10 @@ public class HealthService extends ProfileService {
     private static final int MESSAGE_APP_REGISTRATION_CALLBACK = 11;
     private static final int MESSAGE_CHANNEL_STATE_CALLBACK = 12;
 
+    private static HealthService sHealthService;
+
     static {
         classInitNative();
-    }
-
-    @Override
-    protected String getName() {
-        return TAG;
     }
 
     @Override
@@ -94,11 +94,13 @@ public class HealthService extends ProfileService {
         mHandler = new HealthServiceMessageHandler(looper);
         initializeNative();
         mNativeAvailable = true;
+        setHealthService(this);
         return true;
     }
 
     @Override
     protected boolean stop() {
+        setHealthService(null);
         if (mHandler != null) {
             mHandler.removeCallbacksAndMessages(null);
             Looper looper = mHandler.getLooper();
@@ -126,7 +128,7 @@ public class HealthService extends ProfileService {
     }
 
     @Override
-    protected boolean cleanup() {
+    protected void cleanup() {
         mHandler = null;
         //Cleanup native
         if (mNativeAvailable) {
@@ -142,7 +144,31 @@ public class HealthService extends ProfileService {
         if (mApps != null) {
             mApps.clear();
         }
-        return true;
+    }
+
+    /**
+     * Get a static reference to the current health service instance
+     *
+     * @return current health service instance
+     */
+    @VisibleForTesting
+    public static synchronized HealthService getHealthService() {
+        if (sHealthService == null) {
+            Log.w(TAG, "getHealthService(): service is null");
+            return null;
+        }
+        if (!sHealthService.isAvailable()) {
+            Log.w(TAG, "getHealthService(): service is not available");
+            return null;
+        }
+        return sHealthService;
+    }
+
+    private static synchronized void setHealthService(HealthService instance) {
+        if (DBG) {
+            Log.d(TAG, "setHealthService(): set to: " + instance);
+        }
+        sHealthService = instance;
     }
 
     private final class HealthServiceMessageHandler extends Handler {
@@ -153,7 +179,7 @@ public class HealthService extends ProfileService {
         @Override
         public void handleMessage(Message msg) {
             if (DBG) {
-                log("HealthService Handler msg: " + msg.what);
+                Log.d(TAG, "HealthService Handler msg: " + msg.what);
             }
             switch (msg.what) {
                 case MESSAGE_REGISTER_APPLICATION: {
@@ -166,8 +192,8 @@ public class HealthService extends ProfileService {
                     int halRole = convertRoleToHal(appConfig.getRole());
                     int halChannelType = convertChannelTypeToHal(appConfig.getChannelType());
                     if (VDBG) {
-                        log("register datatype: " + appConfig.getDataType() + " role: " + halRole
-                                + " name: " + appConfig.getName() + " channeltype: "
+                        Log.d(TAG, "register datatype: " + appConfig.getDataType() + " role: "
+                                + halRole + " name: " + appConfig.getName() + " channeltype: "
                                 + halChannelType);
                     }
                     int appId = registerHealthAppNative(appConfig.getDataType(), halRole,
@@ -333,9 +359,8 @@ public class HealthService extends ProfileService {
         }
 
         @Override
-        public boolean cleanup() {
+        public void cleanup() {
             mService = null;
-            return true;
         }
 
         private HealthService getService() {
@@ -561,7 +586,7 @@ public class HealthService extends ProfileService {
 
     private void callStatusCallback(BluetoothHealthAppConfiguration config, int status) {
         if (VDBG) {
-            log("Health Device Application: " + config + " State Change: status:" + status);
+            Log.d(TAG, "Health Device Application: " + config + " State Change: status:" + status);
         }
         IBluetoothHealthCallback callback = (mApps.get(config)).mCallback;
         if (callback == null) {
@@ -643,7 +668,8 @@ public class HealthService extends ProfileService {
             BluetoothDevice device, int state, int prevState, ParcelFileDescriptor fd, int id) {
         broadcastHealthDeviceStateChange(device, state);
 
-        log("Health Device Callback: " + device + " State Change: " + prevState + "->" + state);
+        Log.d(TAG,
+                "Health Device Callback: " + device + " State Change: " + prevState + "->" + state);
 
         ParcelFileDescriptor dupedFd = null;
         if (fd != null) {
@@ -760,6 +786,10 @@ public class HealthService extends ProfileService {
             mHealthDevices.remove(device);
         } else {
             mHealthDevices.put(device, newDeviceState);
+        }
+        if (newDeviceState != prevDeviceState
+                && newDeviceState == BluetoothHealth.STATE_CONNECTED) {
+            MetricsLogger.logProfileConnectionEvent(BluetoothMetricsProto.ProfileId.HEALTH);
         }
     }
 

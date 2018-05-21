@@ -69,6 +69,7 @@ public class BluetoothMapMasInstance implements IObexConnectionHandler {
 
     private volatile boolean mInterrupted;              // Used to interrupt socket accept thread
     private volatile boolean mShutdown = false;         // Used to interrupt socket accept thread
+    private volatile boolean mAcceptNewConnections = false;
 
     private Handler mServiceHandler = null;             // MAP service message handler
     private BluetoothMapService mMapService = null;     // Handle to the outer MAP service
@@ -257,9 +258,12 @@ public class BluetoothMapMasInstance implements IObexConnectionHandler {
         return combinedVersionCounter;
     }
 
-    public synchronized void startRfcommSocketListener() {
+    /**
+     * Start Obex Server Sockets and create the SDP record.
+     */
+    public synchronized void startSocketListeners() {
         if (D) {
-            Log.d(mTag, "Map Service startRfcommSocketListener");
+            Log.d(mTag, "Map Service startSocketListeners");
         }
 
         if (mServerSession != null) {
@@ -280,10 +284,11 @@ public class BluetoothMapMasInstance implements IObexConnectionHandler {
         closeConnectionSocket();
 
         if (mServerSockets != null) {
-            mServerSockets.prepareForNewConnect();
+            mAcceptNewConnections = true;
         } else {
 
             mServerSockets = ObexServerSockets.create(this);
+            mAcceptNewConnections = true;
 
             if (mServerSockets == null) {
                 // TODO: Handle - was not handled before
@@ -422,7 +427,7 @@ public class BluetoothMapMasInstance implements IObexConnectionHandler {
         if (D) {
             Log.d(mTag, "MAP Service restartObexServerSession()");
         }
-        startRfcommSocketListener();
+        startSocketListeners();
     }
 
 
@@ -466,6 +471,9 @@ public class BluetoothMapMasInstance implements IObexConnectionHandler {
 
     @Override
     public synchronized boolean onConnect(BluetoothDevice device, BluetoothSocket socket) {
+        if (!mAcceptNewConnections) {
+            return false;
+        }
         /* Signal to the service that we have received an incoming connection.
          */
         boolean isValid = mMapService.onConnect(device, BluetoothMapMasInstance.this);
@@ -473,6 +481,7 @@ public class BluetoothMapMasInstance implements IObexConnectionHandler {
         if (isValid) {
             mRemoteDevice = device;
             mConnSocket = socket;
+            mAcceptNewConnections = false;
         }
 
         return isValid;
@@ -490,7 +499,7 @@ public class BluetoothMapMasInstance implements IObexConnectionHandler {
             Log.e(mTag, "Failed to accept incomming connection - " + "shutdown");
         } else {
             Log.e(mTag, "Failed to accept incomming connection - " + "restarting");
-            startRfcommSocketListener();
+            startSocketListeners();
         }
     }
 

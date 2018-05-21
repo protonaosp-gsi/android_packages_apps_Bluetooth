@@ -344,6 +344,9 @@ public class BluetoothPbapVcardManager {
                         Log.e(TAG, "Failed to read a contact. Error reason: "
                                 + composer.getErrorReason());
                         return nameList;
+                    } else if (vcard.isEmpty()) {
+                        Log.i(TAG, "Contact may have been deleted during operation");
+                        continue;
                     }
                     if (V) {
                         Log.v(TAG, "Checking selected bits in the vcard composer" + vcard);
@@ -691,6 +694,8 @@ public class BluetoothPbapVcardManager {
             int vcardType;
             if (vcardType21) {
                 vcardType = VCardConfig.VCARD_TYPE_V21_GENERIC;
+                vcardType |= VCardConfig.FLAG_CONVERT_PHONETIC_NAME_STRINGS;
+                vcardType |= VCardConfig.FLAG_REFRAIN_QP_TO_NAME_PROPERTIES;
             } else {
                 vcardType = VCardConfig.VCARD_TYPE_V30_GENERIC;
             }
@@ -737,6 +742,9 @@ public class BluetoothPbapVcardManager {
                     Log.e(TAG,
                             "Failed to read a contact. Error reason: " + composer.getErrorReason());
                     return ResponseCodes.OBEX_HTTP_INTERNAL_ERROR;
+                } else if (vcard.isEmpty()) {
+                    Log.i(TAG, "Contact may have been deleted during operation");
+                    continue;
                 }
                 if (V) {
                     Log.v(TAG, "vCard from composer: " + vcard);
@@ -833,6 +841,9 @@ public class BluetoothPbapVcardManager {
                     Log.e(TAG,
                             "Failed to read a contact. Error reason: " + composer.getErrorReason());
                     return ResponseCodes.OBEX_HTTP_INTERNAL_ERROR;
+                } else if (vcard.isEmpty()) {
+                    Log.i(TAG, "Contact may have been deleted during operation");
+                    continue;
                 }
                 if (V) {
                     Log.v(TAG, "Checking selected bits in the vcard composer" + vcard);
@@ -919,14 +930,16 @@ public class BluetoothPbapVcardManager {
                         continue;
                     }
                     if (needSendBody == NEED_SEND_BODY) {
-                        if (vcard != null) {
-                            vcard = vcardfilter.apply(vcard, vcardType21);
-                        }
                         if (vcard == null) {
                             Log.e(TAG, "Failed to read a contact. Error reason: "
                                     + composer.getErrorReason());
                             return ResponseCodes.OBEX_HTTP_INTERNAL_ERROR;
+                        } else if (vcard.isEmpty()) {
+                            Log.i(TAG, "Call Log may have been deleted during operation");
+                            continue;
                         }
+                        vcard = vcardfilter.apply(vcard, vcardType21);
+
                         if (V) {
                             Log.v(TAG, "Vcard Entry:");
                             Log.v(TAG, vcard);
@@ -1074,6 +1087,7 @@ public class BluetoothPbapVcardManager {
             TITLE(12, "TITLE", false, false),
             ORG(16, "ORG", false, false),
             NOTE(17, "NOTE", false, false),
+            SOUND(19, "SOUND", false, false),
             URL(20, "URL", false, false),
             NICKNAME(23, "NICKNAME", false, true),
             DATETIME(28, "X-IRMC-CALL-DATETIME", false, false);

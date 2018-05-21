@@ -28,8 +28,10 @@ import android.os.UserHandle;
 import android.provider.Settings;
 import android.util.Log;
 
+import com.android.bluetooth.BluetoothMetricsProto;
 import com.android.bluetooth.Utils;
 import com.android.bluetooth.btservice.AdapterService;
+import com.android.bluetooth.btservice.MetricsLogger;
 import com.android.bluetooth.btservice.ProfileService;
 
 import java.util.ArrayList;
@@ -74,11 +76,6 @@ public class HidHostService extends ProfileService {
     }
 
     @Override
-    public String getName() {
-        return TAG;
-    }
-
-    @Override
     public IProfileServiceBinder initBinder() {
         return new BluetoothHidHostBinder(this);
     }
@@ -101,7 +98,7 @@ public class HidHostService extends ProfileService {
     }
 
     @Override
-    protected boolean cleanup() {
+    protected void cleanup() {
         if (DBG) Log.d(TAG, "Stopping Bluetooth HidHostService");
         if (mNativeAvailable) {
             cleanupNative();
@@ -117,48 +114,28 @@ public class HidHostService extends ProfileService {
             }
             mInputDevices.clear();
         }
-        clearHidHostService();
-        return true;
+        // TODO(b/72948646): this should be moved to stop()
+        setHidHostService(null);
     }
 
     public static synchronized HidHostService getHidHostService() {
-        if (sHidHostService != null && sHidHostService.isAvailable()) {
-            if (DBG) {
-                Log.d(TAG, "getHidHostService(): returning " + sHidHostService);
-            }
-            return sHidHostService;
+        if (sHidHostService == null) {
+            Log.w(TAG, "getHidHostService(): service is null");
+            return null;
         }
-        if (DBG) {
-            if (sHidHostService == null) {
-                Log.d(TAG, "getHidHostService(): service is NULL");
-            } else if (!(sHidHostService.isAvailable())) {
-                Log.d(TAG, "getHidHostService(): service is not available");
-            }
+        if (!sHidHostService.isAvailable()) {
+            Log.w(TAG, "getHidHostService(): service is not available ");
+            return null;
         }
-        return null;
+        return sHidHostService;
     }
 
     private static synchronized void setHidHostService(HidHostService instance) {
-        if (instance != null && instance.isAvailable()) {
-            if (DBG) {
-                Log.d(TAG, "setHidHostService(): set to: " + sHidHostService);
-            }
-            sHidHostService = instance;
-        } else {
-            if (DBG) {
-                if (sHidHostService == null) {
-                    Log.d(TAG, "setHidHostService(): service not available");
-                } else if (!sHidHostService.isAvailable()) {
-                    Log.d(TAG, "setHidHostService(): service is cleaning up");
-                }
-            }
+        if (DBG) {
+            Log.d(TAG, "setHidHostService(): set to: " + instance);
         }
+        sHidHostService = instance;
     }
-
-    private static synchronized void clearHidHostService() {
-        sHidHostService = null;
-    }
-
 
     private final Handler mHandler = new Handler() {
 
@@ -241,7 +218,7 @@ public class HidHostService extends ProfileService {
                 case MESSAGE_SET_PROTOCOL_MODE: {
                     BluetoothDevice device = (BluetoothDevice) msg.obj;
                     byte protocolMode = (byte) msg.arg1;
-                    log("sending set protocol mode(" + protocolMode + ")");
+                    Log.d(TAG, "sending set protocol mode(" + protocolMode + ")");
                     if (!setProtocolModeNative(Utils.getByteAddress(device), protocolMode)) {
                         Log.e(TAG, "Error: set protocol mode native returns false");
                     }
@@ -336,9 +313,8 @@ public class HidHostService extends ProfileService {
         }
 
         @Override
-        public boolean cleanup() {
+        public void cleanup() {
             mService = null;
-            return true;
         }
 
         private HidHostService getService() {
@@ -753,12 +729,15 @@ public class HidHostService extends ProfileService {
             Log.w(TAG, "no state change: " + newState);
             return;
         }
+        if (newState == BluetoothProfile.STATE_CONNECTED) {
+            MetricsLogger.logProfileConnectionEvent(BluetoothMetricsProto.ProfileId.HID_HOST);
+        }
         mInputDevices.put(device, newState);
 
         /* Notifying the connection state change of the profile before sending the intent for
            connection state change, as it was causing a race condition, with the UI not being
            updated with the correct connection state. */
-        log("Connection state " + device + ": " + prevState + "->" + newState);
+        Log.d(TAG, "Connection state " + device + ": " + prevState + "->" + newState);
         Intent intent = new Intent(BluetoothHidHost.ACTION_CONNECTION_STATE_CHANGED);
         intent.putExtra(BluetoothProfile.EXTRA_PREVIOUS_STATE, prevState);
         intent.putExtra(BluetoothProfile.EXTRA_STATE, newState);
@@ -782,7 +761,7 @@ public class HidHostService extends ProfileService {
         intent.addFlags(Intent.FLAG_RECEIVER_REGISTERED_ONLY_BEFORE_BOOT);
         sendBroadcast(intent, BLUETOOTH_PERM);
         if (DBG) {
-            log("Protocol Mode (" + device + "): " + protocolMode);
+            Log.d(TAG, "Protocol Mode (" + device + "): " + protocolMode);
         }
     }
 
@@ -810,7 +789,7 @@ public class HidHostService extends ProfileService {
         intent.addFlags(Intent.FLAG_RECEIVER_REGISTERED_ONLY_BEFORE_BOOT);
         sendBroadcast(intent, BLUETOOTH_PERM);
         if (DBG) {
-            log("Idle time (" + device + "): " + idleTime);
+            Log.d(TAG, "Idle time (" + device + "): " + idleTime);
         }
     }
 

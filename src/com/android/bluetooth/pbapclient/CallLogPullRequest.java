@@ -15,12 +15,17 @@
  */
 package com.android.bluetooth.pbapclient;
 
+import android.accounts.Account;
 import android.content.ContentProviderOperation;
 import android.content.ContentValues;
 import android.content.Context;
 import android.content.OperationApplicationException;
+import android.database.Cursor;
+import android.net.Uri;
 import android.os.RemoteException;
 import android.provider.CallLog;
+import android.provider.CallLog.Calls;
+import android.provider.ContactsContract;
 import android.util.Log;
 import android.util.Pair;
 
@@ -30,20 +35,26 @@ import com.android.vcard.VCardEntry.PhoneData;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 
 public class CallLogPullRequest extends PullRequest {
-    private static final boolean DBG = true;
-    private static final boolean VDBG = false;
+    private static final boolean DBG = Utils.DBG;
+    private static final boolean VDBG = Utils.VDBG;
     private static final String TAG = "PbapCallLogPullRequest";
     private static final String TIMESTAMP_PROPERTY = "X-IRMC-CALL-DATETIME";
     private static final String TIMESTAMP_FORMAT = "yyyyMMdd'T'HHmmss";
 
+    private final Account mAccount;
     private Context mContext;
+    private HashMap<String, Integer> mCallCounter;
 
-    public CallLogPullRequest(Context context, String path) {
+    public CallLogPullRequest(Context context, String path, HashMap<String, Integer> map,
+            Account account) {
         mContext = context;
         this.path = path;
+        mCallCounter = map;
+        mAccount = account;
     }
 
     @Override
@@ -77,14 +88,20 @@ public class CallLogPullRequest extends PullRequest {
                 ContentValues values = new ContentValues();
 
                 values.put(CallLog.Calls.TYPE, type);
-
+                values.put(Calls.PHONE_ACCOUNT_ID, mAccount.hashCode());
                 List<PhoneData> phones = vcard.getPhoneList();
                 if (phones == null || phones.get(0).getNumber().equals(";")) {
                     values.put(CallLog.Calls.NUMBER, "");
                 } else {
-                    values.put(CallLog.Calls.NUMBER, phones.get(0).getNumber());
+                    String phoneNumber = phones.get(0).getNumber();
+                    values.put(CallLog.Calls.NUMBER, phoneNumber);
+                    if (mCallCounter.get(phoneNumber) != null) {
+                        int updateCounter = mCallCounter.get(phoneNumber) + 1;
+                        mCallCounter.put(phoneNumber, updateCounter);
+                    } else {
+                        mCallCounter.put(phoneNumber, 1);
+                    }
                 }
-
                 List<Pair<String, String>> irmc = vcard.getUnknownXData();
                 SimpleDateFormat parser = new SimpleDateFormat(TIMESTAMP_FORMAT);
                 if (irmc != null) {
@@ -101,7 +118,6 @@ public class CallLogPullRequest extends PullRequest {
                         }
                     }
                 }
-
                 ops.add(ContentProviderOperation.newInsert(CallLog.Calls.CONTENT_URI)
                         .withValues(values)
                         .withYieldAllowed(true)
@@ -109,6 +125,10 @@ public class CallLogPullRequest extends PullRequest {
             }
             mContext.getContentResolver().applyBatch(CallLog.AUTHORITY, ops);
             Log.d(TAG, "Updated call logs.");
+            //OUTGOING_TYPE is the last callLog we fetched.
+            if (type == CallLog.Calls.OUTGOING_TYPE) {
+                updateTimesContacted();
+            }
         } catch (RemoteException | OperationApplicationException e) {
             Log.d(TAG, "Failed to update call log for path=" + path, e);
         } finally {
@@ -117,4 +137,29 @@ public class CallLogPullRequest extends PullRequest {
             }
         }
     }
+
+    private void updateTimesContacted() {
+        for (String key : mCallCounter.keySet()) {
+            ContentValues values = new ContentValues();
+            values.put(ContactsContract.RawContacts.TIMES_CONTACTED, mCallCounter.get(key));
+            Uri uri = Uri.withAppendedPath(ContactsContract.PhoneLookup.CONTENT_FILTER_URI,
+                    Uri.encode(key));
+            Cursor c = mContext.getContentResolver().query(uri, null, null, null);
+            if (c != null && c.getCount() > 0) {
+                c.moveToNext();
+                String contactId = c.getString(c.getColumnIndex(
+                        ContactsContract.PhoneLookup.CONTACT_ID));
+                if (VDBG) {
+                    Log.d(TAG, "onPullComplete: ID " + contactId + " key : " + key);
+                }
+                String where = ContactsContract.RawContacts.CONTACT_ID + "=" + contactId;
+                mContext.getContentResolver().update(
+                        ContactsContract.RawContacts.CONTENT_URI, values, where, null);
+            }
+        }
+        if (DBG) {
+            Log.d(TAG, "Updated TIMES_CONTACTED");
+        }
+    }
+
 }

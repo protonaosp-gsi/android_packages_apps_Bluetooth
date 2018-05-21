@@ -68,6 +68,8 @@
     <uses-permission android:name="android.permission.UPDATE_DEVICE_STATS" />
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" />
 
+    <uses-sdk android:minSdkVersion="14"/>
+
     <!-- For PBAP Owner Vcard Info -->
     <uses-permission android:name="android.permission.READ_PROFILE"/>
     <application
@@ -318,6 +320,14 @@
         </service>
         <service
             android:process="@string/process"
+            android:name = ".avrcp.AvrcpTargetService"
+            android:enabled = "@bool/profile_supported_avrcp_target" >
+            <intent-filter>
+                <action android:name="android.bluetooth.IBluetoothAvrcp" />
+            </intent-filter>
+        </service>
+        <service
+            android:process="@string/process"
             android:name = ".avrcpcontroller.AvrcpControllerService"
             android:enabled="@bool/profile_supported_avrcp_controller">
             <intent-filter>
@@ -380,6 +390,14 @@
             android:enabled="@bool/profile_supported_pbapclient">
             <intent-filter>
                 <action android:name="android.bluetooth.IBluetoothPbapClient" />
+            </intent-filter>
+        </service>
+        <service
+            android:process="@string/process"
+            android:name = ".hearingaid.HearingAidService"
+            android:enabled="@bool/profile_supported_hearing_aid">
+            <intent-filter>
+                <action android:name="android.bluetooth.IBluetoothHearingAid" />
             </intent-filter>
         </service>
         <!-- Authenticator for PBAP account. -->

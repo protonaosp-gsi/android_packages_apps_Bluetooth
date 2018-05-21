@@ -40,11 +40,13 @@ import android.os.Handler;
 import android.os.Message;
 import android.os.PowerManager;
 import android.os.PowerManager.WakeLock;
+import android.os.SystemClock;
 import android.util.Log;
 import android.webkit.MimeTypeMap;
 
+import com.android.bluetooth.BluetoothMetricsProto;
 import com.android.bluetooth.BluetoothObexTransport;
-import com.android.bluetooth.ObexServerSockets;
+import com.android.bluetooth.btservice.MetricsLogger;
 
 import java.io.BufferedOutputStream;
 import java.io.File;
@@ -98,13 +100,15 @@ public class BluetoothOppObexServerSession extends ServerRequestHandler
 
     boolean mTimeoutMsgSent = false;
 
-    private ObexServerSockets mServerSocket;
+    private BluetoothOppService mBluetoothOppService;
+
+    private int mNumFilesAttemptedToReceive;
 
     public BluetoothOppObexServerSession(Context context, ObexTransport transport,
-            ObexServerSockets serverSocket) {
+            BluetoothOppService service) {
         mContext = context;
         mTransport = transport;
-        mServerSocket = serverSocket;
+        mBluetoothOppService = service;
         PowerManager pm = (PowerManager) mContext.getSystemService(Context.POWER_SERVICE);
         mPartialWakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, TAG);
         mPartialWakeLock.setReferenceCounted(false);
@@ -182,16 +186,8 @@ public class BluetoothOppObexServerSession extends ServerRequestHandler
         if (D) {
             Log.d(TAG, "onPut " + op.toString());
         }
-        HeaderSet request;
-        String name, mimeType;
-        Long length;
 
-        int obexResponse = ResponseCodes.OBEX_HTTP_OK;
-
-        /**
-         * For multiple objects, reject further objects after user deny the
-         * first one
-         */
+        /* For multiple objects, reject further objects after the user denies the first one */
         if (mAccepted == BluetoothShare.USER_CONFIRMATION_DENIED) {
             return ResponseCodes.OBEX_HTTP_FORBIDDEN;
         }
@@ -205,9 +201,10 @@ public class BluetoothOppObexServerSession extends ServerRequestHandler
         boolean isWhitelisted =
                 BluetoothOppManager.getInstance(mContext).isWhitelisted(destination);
 
+        HeaderSet request;
+        String name, mimeType;
+        Long length;
         try {
-            boolean preReject = false;
-
             request = op.getReceivedHeader();
             if (V) {
                 Constants.logHeader(request);
@@ -215,96 +212,71 @@ public class BluetoothOppObexServerSession extends ServerRequestHandler
             name = (String) request.getHeader(HeaderSet.NAME);
             length = (Long) request.getHeader(HeaderSet.LENGTH);
             mimeType = (String) request.getHeader(HeaderSet.TYPE);
-
-            if (length == 0) {
-                if (D) {
-                    Log.w(TAG, "length is 0, reject the transfer");
-                }
-                preReject = true;
-                obexResponse = ResponseCodes.OBEX_HTTP_LENGTH_REQUIRED;
-            }
-
-            if (name == null || name.isEmpty()) {
-                if (D) {
-                    Log.w(TAG, "name is null or empty, reject the transfer");
-                }
-                preReject = true;
-                obexResponse = ResponseCodes.OBEX_HTTP_BAD_REQUEST;
-            }
-
-            if (!preReject) {
-                /* first we look for Mimetype in Android map */
-                String extension, type;
-                int dotIndex = name.lastIndexOf(".");
-                if (dotIndex < 0 && mimeType == null) {
-                    if (D) {
-                        Log.w(TAG,
-                                "There is no file extension or mime type," + "reject the transfer");
-                    }
-                    preReject = true;
-                    obexResponse = ResponseCodes.OBEX_HTTP_BAD_REQUEST;
-                } else {
-                    extension = name.substring(dotIndex + 1).toLowerCase();
-                    MimeTypeMap map = MimeTypeMap.getSingleton();
-                    type = map.getMimeTypeFromExtension(extension);
-                    if (V) {
-                        Log.v(TAG, "Mimetype guessed from extension " + extension + " is " + type);
-                    }
-                    if (type != null) {
-                        mimeType = type;
-
-                    } else {
-                        if (mimeType == null) {
-                            if (D) {
-                                Log.w(TAG, "Can't get mimetype, reject the transfer");
-                            }
-                            preReject = true;
-                            obexResponse = ResponseCodes.OBEX_HTTP_UNSUPPORTED_TYPE;
-                        }
-                    }
-                    if (mimeType != null) {
-                        mimeType = mimeType.toLowerCase();
-                    }
-                }
-            }
-
-            // Reject policy: anything outside the "white list" plus unspecified
-            // MIME Types. Also reject everything in the "black list".
-            if (!preReject && (mimeType == null || (!isWhitelisted && !Constants.mimeTypeMatches(
-                    mimeType, Constants.ACCEPTABLE_SHARE_INBOUND_TYPES))
-                    || Constants.mimeTypeMatches(mimeType,
-                    Constants.UNACCEPTABLE_SHARE_INBOUND_TYPES))) {
-                if (D) {
-                    Log.w(TAG, "mimeType is null or in unacceptable list, reject the transfer");
-                }
-                preReject = true;
-                obexResponse = ResponseCodes.OBEX_HTTP_UNSUPPORTED_TYPE;
-            }
-
-            if (preReject && obexResponse != ResponseCodes.OBEX_HTTP_OK) {
-                // some bad implemented client won't send disconnect
-                return obexResponse;
-            }
-
         } catch (IOException e) {
-            Log.e(TAG, "get getReceivedHeaders error " + e);
+            Log.e(TAG, "onPut: getReceivedHeaders error " + e);
             return ResponseCodes.OBEX_HTTP_BAD_REQUEST;
         }
 
+        if (length == 0) {
+            if (D) {
+                Log.w(TAG, "length is 0, reject the transfer");
+            }
+            return ResponseCodes.OBEX_HTTP_LENGTH_REQUIRED;
+        }
+
+        if (name == null || name.isEmpty()) {
+            if (D) {
+                Log.w(TAG, "name is null or empty, reject the transfer");
+            }
+            return ResponseCodes.OBEX_HTTP_BAD_REQUEST;
+        }
+
+        // First we look for the mime type in the Android map
+        String extension, type;
+        int dotIndex = name.lastIndexOf(".");
+        if (dotIndex < 0 && mimeType == null) {
+            if (D) {
+                Log.w(TAG, "There is no file extension or mime type, reject the transfer");
+            }
+            return ResponseCodes.OBEX_HTTP_BAD_REQUEST;
+        } else {
+            extension = name.substring(dotIndex + 1).toLowerCase();
+            MimeTypeMap map = MimeTypeMap.getSingleton();
+            type = map.getMimeTypeFromExtension(extension);
+            if (V) {
+                Log.v(TAG, "Mimetype guessed from extension " + extension + " is " + type);
+            }
+            if (type != null) {
+                mimeType = type;
+            } else {
+                if (mimeType == null) {
+                    if (D) {
+                        Log.w(TAG, "Can't get mimetype, reject the transfer");
+                    }
+                    return ResponseCodes.OBEX_HTTP_UNSUPPORTED_TYPE;
+                }
+            }
+            mimeType = mimeType.toLowerCase();
+        }
+
+        // Reject anything outside the "whitelist" plus unspecified MIME Types.
+        if (mimeType == null || (!isWhitelisted && !Constants.mimeTypeMatches(mimeType,
+                Constants.ACCEPTABLE_SHARE_INBOUND_TYPES))) {
+            if (D) {
+                Log.w(TAG, "mimeType is null or in unacceptable list, reject the transfer");
+            }
+            return ResponseCodes.OBEX_HTTP_UNSUPPORTED_TYPE;
+        }
+
         ContentValues values = new ContentValues();
-
         values.put(BluetoothShare.FILENAME_HINT, name);
-
         values.put(BluetoothShare.TOTAL_BYTES, length);
-
         values.put(BluetoothShare.MIMETYPE, mimeType);
-
         values.put(BluetoothShare.DESTINATION, destination);
-
         values.put(BluetoothShare.DIRECTION, BluetoothShare.DIRECTION_INBOUND);
         values.put(BluetoothShare.TIMESTAMP, mTimestamp);
 
-        /** It's not first put if !serverBlocking, so we auto accept it */
+        // It's not first put if !serverBlocking, so we auto accept it
         if (!mServerBlocking && (mAccepted == BluetoothShare.USER_CONFIRMATION_CONFIRMED
                 || mAccepted == BluetoothShare.USER_CONFIRMATION_AUTO_CONFIRMED)) {
             values.put(BluetoothShare.USER_CONFIRMATION,
@@ -314,7 +286,6 @@ public class BluetoothOppObexServerSession extends ServerRequestHandler
         if (isWhitelisted) {
             values.put(BluetoothShare.USER_CONFIRMATION,
                     BluetoothShare.USER_CONFIRMATION_HANDOVER_CONFIRMED);
-
         }
 
         Uri contentUri = mContext.getContentResolver().insert(BluetoothShare.CONTENT_URI, values);
@@ -322,8 +293,6 @@ public class BluetoothOppObexServerSession extends ServerRequestHandler
 
         if (V) {
             Log.v(TAG, "insert contentUri: " + contentUri);
-        }
-        if (V) {
             Log.v(TAG, "mLocalShareInfoId = " + mLocalShareInfoId);
         }
 
@@ -375,10 +344,13 @@ public class BluetoothOppObexServerSession extends ServerRequestHandler
         }
         int status = BluetoothShare.STATUS_SUCCESS;
 
+        int obexResponse = ResponseCodes.OBEX_HTTP_OK;
+
         if (mAccepted == BluetoothShare.USER_CONFIRMATION_CONFIRMED
                 || mAccepted == BluetoothShare.USER_CONFIRMATION_AUTO_CONFIRMED
                 || mAccepted == BluetoothShare.USER_CONFIRMATION_HANDOVER_CONFIRMED) {
             /* Confirm or auto-confirm */
+            mNumFilesAttemptedToReceive++;
 
             if (mFileInfo.mFileName == null) {
                 status = mFileInfo.mStatus;
@@ -479,7 +451,7 @@ public class BluetoothOppObexServerSession extends ServerRequestHandler
         }
 
         long position = 0;
-        long percent = 0;
+        long percent;
         long prevPercent = 0;
 
         if (!error) {
@@ -489,13 +461,15 @@ public class BluetoothOppObexServerSession extends ServerRequestHandler
         if (!error) {
             int outputBufferSize = op.getMaxPacketSize();
             byte[] b = new byte[outputBufferSize];
-            int readLength = 0;
+            int readLength;
             long timestamp = 0;
+            long currentTime;
+            long prevTimestamp = SystemClock.elapsedRealtime();
             try {
                 while ((!mInterrupted) && (position != fileInfo.mLength)) {
 
                     if (V) {
-                        timestamp = System.currentTimeMillis();
+                        timestamp = SystemClock.elapsedRealtime();
                     }
 
                     readLength = is.read(b);
@@ -510,20 +484,23 @@ public class BluetoothOppObexServerSession extends ServerRequestHandler
                     bos.write(b, 0, readLength);
                     position += readLength;
                     percent = position * 100 / fileInfo.mLength;
+                    currentTime = SystemClock.elapsedRealtime();
 
                     if (V) {
                         Log.v(TAG,
                                 "Receive file position = " + position + " readLength " + readLength
-                                        + " bytes took " + (System.currentTimeMillis() - timestamp)
-                                        + " ms");
+                                        + " bytes took " + (currentTime - timestamp) + " ms");
                     }
 
                     // Update the Progress Bar only if there is change in percentage
-                    if (percent > prevPercent) {
+                    // or once per a period to notify NFC of this transfer is still alive
+                    if (percent > prevPercent
+                            || currentTime - prevTimestamp > Constants.NFC_ALIVE_CHECK_MS) {
                         ContentValues updateValues = new ContentValues();
                         updateValues.put(BluetoothShare.CURRENT_BYTES, position);
                         mContext.getContentResolver().update(contentUri, updateValues, null, null);
                         prevPercent = percent;
+                        prevTimestamp = currentTime;
                     }
                 }
             } catch (IOException e1) {
@@ -615,8 +592,7 @@ public class BluetoothOppObexServerSession extends ServerRequestHandler
         } else {
             destination = "FF:FF:FF:00:00:00";
         }
-        boolean isHandover =
-                BluetoothOppManager.getInstance(mContext).isWhitelisted(destination);
+        boolean isHandover = BluetoothOppManager.getInstance(mContext).isWhitelisted(destination);
         if (isHandover) {
             // Notify the handover requester file transfer has started
             Intent intent = new Intent(Constants.ACTION_HANDOVER_STARTED);
@@ -630,6 +606,7 @@ public class BluetoothOppObexServerSession extends ServerRequestHandler
             mContext.sendBroadcast(intent, Constants.HANDOVER_STATUS_PERMISSION);
         }
         mTimestamp = System.currentTimeMillis();
+        mNumFilesAttemptedToReceive = 0;
         return ResponseCodes.OBEX_HTTP_OK;
     }
 
@@ -637,6 +614,10 @@ public class BluetoothOppObexServerSession extends ServerRequestHandler
     public void onDisconnect(HeaderSet req, HeaderSet resp) {
         if (D) {
             Log.d(TAG, "onDisconnect");
+        }
+        if (mNumFilesAttemptedToReceive > 0) {
+            // Log incoming OPP transfer if more than one file is accepted by user
+            MetricsLogger.logProfileConnectionEvent(BluetoothMetricsProto.ProfileId.OPP);
         }
         resp.responseCode = ResponseCodes.OBEX_HTTP_OK;
     }
@@ -653,13 +634,7 @@ public class BluetoothOppObexServerSession extends ServerRequestHandler
             Log.d(TAG, "onClose");
         }
         releaseWakeLocks();
-
-        if (mServerSocket != null) {
-            if (D) {
-                Log.d(TAG, "prepareForNewConnect");
-            }
-            mServerSocket.prepareForNewConnect();
-        }
+        mBluetoothOppService.acceptNewConnections();
         BluetoothOppUtility.cancelNotification(mContext);
         /* onClose could happen even before start() where mCallback is set */
         if (mCallback != null) {
