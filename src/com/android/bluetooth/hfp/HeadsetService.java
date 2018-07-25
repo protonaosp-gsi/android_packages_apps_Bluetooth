@@ -1274,7 +1274,8 @@ public class HeadsetService extends ProfileService {
      * @param dialNumber number to dial
      * @return true on successful dial out
      */
-    boolean dialOutgoingCall(BluetoothDevice fromDevice, String dialNumber) {
+    @VisibleForTesting(visibility = VisibleForTesting.Visibility.PACKAGE)
+    public boolean dialOutgoingCall(BluetoothDevice fromDevice, String dialNumber) {
         synchronized (mStateMachines) {
             Log.i(TAG, "dialOutgoingCall: from " + fromDevice);
             if (!isOnStateMachineThread()) {
@@ -1306,7 +1307,13 @@ public class HeadsetService extends ProfileService {
         }
     }
 
-    boolean hasDeviceInitiatedDialingOut() {
+    /**
+     * Check if any connected headset has started dialing calls
+     *
+     * @return true if some device has started dialing calls
+     */
+    @VisibleForTesting(visibility = VisibleForTesting.Visibility.PACKAGE)
+    public boolean hasDeviceInitiatedDialingOut() {
         synchronized (mStateMachines) {
             return mDialingOutTimeoutEvent != null;
         }
@@ -1479,19 +1486,26 @@ public class HeadsetService extends ProfileService {
             }
         }
         mStateMachinesThread.getThreadHandler().post(() -> {
-            boolean shouldCallAudioBeActiveBefore = shouldCallAudioBeActive();
+            boolean isCallIdleBefore = mSystemInterface.isCallIdle();
             mSystemInterface.getHeadsetPhoneState().setNumActiveCall(numActive);
             mSystemInterface.getHeadsetPhoneState().setNumHeldCall(numHeld);
             mSystemInterface.getHeadsetPhoneState().setCallState(callState);
             // Suspend A2DP when call about is about to become active
             if (callState != HeadsetHalConstants.CALL_STATE_DISCONNECTED
-                    && shouldCallAudioBeActive() && !shouldCallAudioBeActiveBefore) {
+                    && !mSystemInterface.isCallIdle() && isCallIdleBefore) {
                 mSystemInterface.getAudioManager().setParameters("A2dpSuspended=true");
             }
         });
         doForEachConnectedStateMachine(
                 stateMachine -> stateMachine.sendMessage(HeadsetStateMachine.CALL_STATE_CHANGED,
                         new HeadsetCallState(numActive, numHeld, callState, number, type)));
+        mStateMachinesThread.getThreadHandler().post(() -> {
+            if (callState == HeadsetHalConstants.CALL_STATE_IDLE
+                    && mSystemInterface.isCallIdle() && !isAudioOn()) {
+                // Resume A2DP when call ended and SCO is not connected
+                mSystemInterface.getAudioManager().setParameters("A2dpSuspended=false");
+            }
+        });
 
     }
 

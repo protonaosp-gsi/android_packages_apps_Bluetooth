@@ -32,6 +32,8 @@ import android.os.Looper;
 import android.util.Log;
 import android.view.KeyEvent;
 
+import com.android.bluetooth.Utils;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -86,7 +88,7 @@ public class MediaPlayerList {
             Collections.synchronizedMap(new HashMap<Integer, BrowsedPlayerWrapper>());
     private int mActivePlayerId = NO_ACTIVE_PLAYER;
 
-    private MediaUpdateCallback mCallback;
+    private AvrcpTargetService.ListCallback mCallback;
 
     interface MediaUpdateCallback {
         void run(MediaData data);
@@ -98,6 +100,10 @@ public class MediaPlayerList {
 
     interface GetFolderItemsCallback {
         void run(String parentId, List<ListItem> items);
+    }
+
+    interface FolderUpdateCallback {
+        void run(boolean availablePlayers, boolean addressedPlayers, boolean uids);
     }
 
     MediaPlayerList(Looper looper, Context context) {
@@ -122,7 +128,7 @@ public class MediaPlayerList {
         mMediaSessionManager.setCallback(mButtonDispatchCallback, null);
     }
 
-    void init(MediaUpdateCallback callback) {
+    void init(AvrcpTargetService.ListCallback callback) {
         Log.v(TAG, "Initializing MediaPlayerList");
         mCallback = callback;
 
@@ -146,7 +152,7 @@ public class MediaPlayerList {
                 for (BrowsedPlayerWrapper wrapper : players) {
                     // Generate new id and add the browsable player
                     if (!mMediaPlayerIds.containsKey(wrapper.getPackageName())) {
-                        mMediaPlayerIds.put(wrapper.getPackageName(), mMediaPlayerIds.size() + 1);
+                        mMediaPlayerIds.put(wrapper.getPackageName(), getFreeMediaPlayerId());
                     }
 
                     d("Adding Browser Wrapper for " + wrapper.getPackageName() + " with id "
@@ -194,14 +200,16 @@ public class MediaPlayerList {
             player.disconnect();
         }
         mBrowsablePlayers.clear();
-
-        mMediaPlayerIds = null;
-        mMediaPlayers = null;
-        mBrowsablePlayers = null;
     }
 
     int getCurrentPlayerId() {
         return BLUETOOTH_PLAYER_ID;
+    }
+
+    int getFreeMediaPlayerId() {
+        int id = 0;
+        while (mMediaPlayerIds.containsValue(++id)) {}
+        return id;
     }
 
     MediaPlayerWrapper getActivePlayer() {
@@ -403,7 +411,7 @@ public class MediaPlayerList {
         // that key.
         String packageName = controller.getPackageName();
         if (!mMediaPlayerIds.containsKey(packageName)) {
-            mMediaPlayerIds.put(packageName, mMediaPlayerIds.size() + 1);
+            mMediaPlayerIds.put(packageName, getFreeMediaPlayerId());
         }
 
         int playerId = mMediaPlayerIds.get(packageName);
@@ -477,6 +485,10 @@ public class MediaPlayerList {
             return;
         }
 
+        if (Utils.isPtsTestMode()) {
+            sendFolderUpdate(true, true, false);
+        }
+
         sendMediaUpdate(getActivePlayer().getCurrentMediaData());
     }
 
@@ -486,6 +498,16 @@ public class MediaPlayerList {
         int action = pushed ? KeyEvent.ACTION_DOWN : KeyEvent.ACTION_UP;
         KeyEvent event = new KeyEvent(action, AvrcpPassthrough.toKeyCode(key));
         mMediaSessionManager.dispatchMediaKeyEvent(event);
+    }
+
+    private void sendFolderUpdate(boolean availablePlayers, boolean addressedPlayers,
+            boolean uids) {
+        d("sendFolderUpdate");
+        if (mCallback == null) {
+            return;
+        }
+
+        mCallback.run(availablePlayers, addressedPlayers, uids);
     }
 
     private void sendMediaUpdate(MediaData data) {
@@ -574,11 +596,6 @@ public class MediaPlayerList {
 
             if (data.state == null) {
                 Log.w(TAG, "mediaUpdatedCallback(): Tried to update with null state");
-                return;
-            }
-
-            if (data.state.getState() == PlaybackState.STATE_BUFFERING) {
-                Log.d(TAG, "mediaUpdatedCallback(): Currently buffering, deferring update");
                 return;
             }
 
