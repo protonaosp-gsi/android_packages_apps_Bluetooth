@@ -1014,8 +1014,9 @@ public class HeadsetStateMachine extends StateMachine {
             if (mConnectingTimestampMs == Long.MIN_VALUE) {
                 mConnectingTimestampMs = SystemClock.uptimeMillis();
             }
-            updateAgIndicatorEnableState(DEFAULT_AG_INDICATOR_ENABLE_STATE);
             if (mPrevState == mConnecting) {
+                // Reset AG indicator subscriptions, HF can set this later using AT+BIA command
+                updateAgIndicatorEnableState(DEFAULT_AG_INDICATOR_ENABLE_STATE);
                 // Reset NREC on connect event. Headset will override later
                 processNoiseReductionEvent(true);
                 // Query phone state for initial setup
@@ -1200,7 +1201,8 @@ public class HeadsetStateMachine extends StateMachine {
             // Set active device to current active SCO device when the current active device
             // is different from mCurrentDevice. This is to accommodate active device state
             // mis-match between native and Java.
-            if (!mDevice.equals(mHeadsetService.getActiveDevice())) {
+            if (!mDevice.equals(mHeadsetService.getActiveDevice())
+                    && !hasDeferredMessages(DISCONNECT_AUDIO)) {
                 mHeadsetService.setActiveDevice(mDevice);
             }
             setAudioParameters();
@@ -1826,19 +1828,20 @@ public class HeadsetStateMachine extends StateMachine {
 
     // HSP +CKPD command
     private void processKeyPressed(BluetoothDevice device) {
-        final HeadsetPhoneState phoneState = mSystemInterface.getHeadsetPhoneState();
-        if (phoneState.getCallState() == HeadsetHalConstants.CALL_STATE_INCOMING) {
+        if (mSystemInterface.isRinging()) {
             mSystemInterface.answerCall(device);
-        } else if (phoneState.getNumActiveCall() > 0) {
-            if (getAudioState() != BluetoothHeadset.STATE_AUDIO_DISCONNECTED) {
-                mHeadsetService.setActiveDevice(mDevice);
-                mSystemInterface.getAudioManager().setParameters("A2dpSuspended=true");
-                if (!mNativeInterface.connectAudio(mDevice)) {
-                    mSystemInterface.getAudioManager().setParameters("A2dpSuspended=false");
-                    Log.w(TAG, "processKeyPressed: failed to connectAudio to " + mDevice);
+        } else if (mSystemInterface.isInCall()) {
+            if (getAudioState() == BluetoothHeadset.STATE_AUDIO_DISCONNECTED) {
+                // Should connect audio as well
+                if (!mHeadsetService.setActiveDevice(mDevice)) {
+                    Log.w(TAG, "processKeyPressed, failed to set active device to " + mDevice);
                 }
             } else {
                 mSystemInterface.hangupCall(device);
+            }
+        } else if (getAudioState() != BluetoothHeadset.STATE_AUDIO_DISCONNECTED) {
+            if (!mNativeInterface.disconnectAudio(mDevice)) {
+                Log.w(TAG, "processKeyPressed, failed to disconnect audio from " + mDevice);
             }
         } else {
             // We have already replied OK to this HSP command, no feedback is needed

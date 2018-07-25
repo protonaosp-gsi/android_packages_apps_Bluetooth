@@ -37,7 +37,6 @@ import android.util.Log;
 
 import com.android.bluetooth.BluetoothMetricsProto;
 import com.android.bluetooth.Utils;
-import com.android.bluetooth.avrcp.Avrcp;
 import com.android.bluetooth.avrcp.AvrcpTargetService;
 import com.android.bluetooth.btservice.AdapterService;
 import com.android.bluetooth.btservice.MetricsLogger;
@@ -63,7 +62,6 @@ public class A2dpService extends ProfileService {
     private BluetoothAdapter mAdapter;
     private AdapterService mAdapterService;
     private HandlerThread mStateMachinesThread;
-    private Avrcp mAvrcp;
 
     @VisibleForTesting
     A2dpNativeInterface mA2dpNativeInterface;
@@ -118,28 +116,25 @@ public class A2dpService extends ProfileService {
         mMaxConnectedAudioDevices = mAdapterService.getMaxConnectedAudioDevices();
         Log.i(TAG, "Max connected audio devices set to " + mMaxConnectedAudioDevices);
 
-        // Step 3: Setup AVRCP
-        mAvrcp = Avrcp.make(this);
-
-        // Step 4: Start handler thread for state machines
+        // Step 3: Start handler thread for state machines
         mStateMachines.clear();
         mStateMachinesThread = new HandlerThread("A2dpService.StateMachines");
         mStateMachinesThread.start();
 
-        // Step 5: Setup codec config
+        // Step 4: Setup codec config
         mA2dpCodecConfig = new A2dpCodecConfig(this, mA2dpNativeInterface);
 
-        // Step 6: Initialize native interface
+        // Step 5: Initialize native interface
         mA2dpNativeInterface.init(mMaxConnectedAudioDevices,
                                   mA2dpCodecConfig.codecConfigPriorities());
 
-        // Step 7: Check if A2DP is in offload mode
+        // Step 6: Check if A2DP is in offload mode
         mA2dpOffloadEnabled = mAdapterService.isA2dpOffloadEnabled();
         if (DBG) {
             Log.d(TAG, "A2DP offload flag set to " + mA2dpOffloadEnabled);
         }
 
-        // Step 8: Setup broadcast receivers
+        // Step 7: Setup broadcast receivers
         IntentFilter filter = new IntentFilter();
         filter.addAction(BluetoothDevice.ACTION_BOND_STATE_CHANGED);
         mBondStateChangedReceiver = new BondStateChangedReceiver();
@@ -149,10 +144,10 @@ public class A2dpService extends ProfileService {
         mConnectionStateChangedReceiver = new ConnectionStateChangedReceiver();
         registerReceiver(mConnectionStateChangedReceiver, filter);
 
-        // Step 9: Mark service as started
+        // Step 8: Mark service as started
         setA2dpService(this);
 
-        // Step 10: Clear active device
+        // Step 9: Clear active device
         setActiveDevice(null);
 
         return true;
@@ -166,8 +161,13 @@ public class A2dpService extends ProfileService {
             return true;
         }
 
-        // Step 9: Clear active device
-        setActiveDevice(null);
+        // Step 10: Store volume if there is an active device
+        if (mActiveDevice != null && AvrcpTargetService.get() != null) {
+            AvrcpTargetService.get().storeVolumeForDevice(mActiveDevice);
+        }
+
+        // Step 9: Clear active device and stop playing audio
+        removeActiveDevice(true);
 
         // Step 8: Mark service as stopped
         setA2dpService(null);
@@ -195,11 +195,6 @@ public class A2dpService extends ProfileService {
         }
         mStateMachinesThread.quitSafely();
         mStateMachinesThread = null;
-
-        // Step 3: Cleanup AVRCP
-        mAvrcp.doQuit();
-        mAvrcp.cleanup();
-        mAvrcp = null;
 
         // Step 2: Reset maximum number of connected audio devices
         mMaxConnectedAudioDevices = 1;
@@ -331,12 +326,15 @@ public class A2dpService extends ProfileService {
      * The check considers a number of factors during the evaluation.
      *
      * @param device the peer device to connect to
+     * @param isOutgoingRequest if true, the check is for outgoing connection
+     * request, otherwise is for incoming connection request
      * @return true if connection is allowed, otherwise false
      */
     @VisibleForTesting(otherwise = VisibleForTesting.PACKAGE_PRIVATE)
-    public boolean okToConnect(BluetoothDevice device) {
+    public boolean okToConnect(BluetoothDevice device, boolean isOutgoingRequest) {
+        Log.i(TAG, "okToConnect: device " + device + " isOutgoingRequest: " + isOutgoingRequest);
         // Check if this is an incoming connection in Quiet mode.
-        if (mAdapterService.isQuietModeEnabled()) {
+        if (mAdapterService.isQuietModeEnabled() && !isOutgoingRequest) {
             Log.e(TAG, "okToConnect: cannot connect to " + device + " : quiet mode enabled");
             return false;
         }
@@ -422,6 +420,39 @@ public class A2dpService extends ProfileService {
         }
     }
 
+    private void removeActiveDevice(boolean forceStopPlayingAudio) {
+        BluetoothDevice previousActiveDevice = mActiveDevice;
+        synchronized (mStateMachines) {
+            // Clear the active device
+            mActiveDevice = null;
+            // This needs to happen before we inform the audio manager that the device
+            // disconnected. Please see comment in broadcastActiveDevice() for why.
+            broadcastActiveDevice(null);
+
+            if (previousActiveDevice == null) {
+                return;
+            }
+
+            // Make sure the Audio Manager knows the previous Active device is disconnected.
+            // However, if A2DP is still connected and not forcing stop audio for that remote
+            // device, the user has explicitly switched the output to the local device and music
+            // should continue playing. Otherwise, the remote device has been indeed disconnected
+            // and audio should be suspended before switching the output to the local device.
+            boolean suppressNoisyIntent = !forceStopPlayingAudio
+                    && (getConnectionState(previousActiveDevice)
+                    == BluetoothProfile.STATE_CONNECTED);
+            Log.i(TAG, "removeActiveDevice: suppressNoisyIntent=" + suppressNoisyIntent);
+            mAudioManager.setBluetoothA2dpDeviceConnectionStateSuppressNoisyIntent(
+                    previousActiveDevice, BluetoothProfile.STATE_DISCONNECTED,
+                    BluetoothProfile.A2DP, suppressNoisyIntent, -1);
+            // Make sure the Active device in native layer is set to null and audio is off
+            if (!mA2dpNativeInterface.setActiveDevice(null)) {
+                Log.w(TAG, "setActiveDevice(null): Cannot remove active device in native "
+                        + "layer");
+            }
+        }
+    }
+
     /**
      * Set the active device.
      *
@@ -435,30 +466,14 @@ public class A2dpService extends ProfileService {
             if (DBG) {
                 Log.d(TAG, "setActiveDevice(" + device + "): previous is " + previousActiveDevice);
             }
+
+            if (previousActiveDevice != null && AvrcpTargetService.get() != null) {
+                AvrcpTargetService.get().storeVolumeForDevice(previousActiveDevice);
+            }
+
             if (device == null) {
-                // Clear the active device
-                mActiveDevice = null;
-                // This needs to happen before we inform the audio manager that the device
-                // disconnected. Please see comment in broadcastActiveDevice() for why.
-                broadcastActiveDevice(null);
-                if (previousActiveDevice != null) {
-                    // Make sure the Audio Manager knows the previous Active device is disconnected.
-                    // However, if A2DP is still connected for that remote device, the user has
-                    // explicitly switched the output to the local device and music should
-                    // continue playing. Otherwise, the remote device has been indeed disconnected,
-                    // and audio should be suspended before switching the output to the local
-                    // device.
-                    mAudioManager.setBluetoothA2dpDeviceConnectionStateSuppressNoisyIntent(
-                            previousActiveDevice, BluetoothProfile.STATE_DISCONNECTED,
-                            BluetoothProfile.A2DP,
-                            getConnectionState(previousActiveDevice)
-                                == BluetoothProfile.STATE_CONNECTED);
-                    // Make sure the Active device in native layer is set to null and audio is off
-                    if (!mA2dpNativeInterface.setActiveDevice(null)) {
-                        Log.w(TAG, "setActiveDevice(null): Cannot remove active device in native "
-                                + "layer");
-                    }
-                }
+                // Remove active device and continue playing audio only if necessary.
+                removeActiveDevice(false);
                 return true;
             }
 
@@ -492,18 +507,39 @@ public class A2dpService extends ProfileService {
                 }
                 // Make sure the Audio Manager knows the previous Active device is disconnected,
                 // and the new Active device is connected.
+                // Also, mute and unmute the output during the switch to avoid audio glitches.
+                boolean wasMuted = false;
                 if (previousActiveDevice != null) {
+                    if (!mAudioManager.isStreamMute(AudioManager.STREAM_MUSIC)) {
+                        mAudioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC,
+                                                         AudioManager.ADJUST_MUTE, 0);
+                        wasMuted = true;
+                    }
                     mAudioManager.setBluetoothA2dpDeviceConnectionStateSuppressNoisyIntent(
                             previousActiveDevice, BluetoothProfile.STATE_DISCONNECTED,
-                            BluetoothProfile.A2DP, true);
+                            BluetoothProfile.A2DP, true, -1);
                 }
+
+                int rememberedVolume = -1;
+                if (AvrcpTargetService.get() != null) {
+                    AvrcpTargetService.get().volumeDeviceSwitched(mActiveDevice);
+
+                    rememberedVolume = AvrcpTargetService.get()
+                            .getRememberedVolumeForDevice(mActiveDevice);
+                }
+
                 mAudioManager.setBluetoothA2dpDeviceConnectionStateSuppressNoisyIntent(
                         mActiveDevice, BluetoothProfile.STATE_CONNECTED, BluetoothProfile.A2DP,
-                        true);
+                        true, rememberedVolume);
+
                 // Inform the Audio Service about the codec configuration
                 // change, so the Audio Service can reset accordingly the audio
                 // feeding parameters in the Audio HAL to the Bluetooth stack.
                 mAudioManager.handleBluetoothA2dpDeviceConfigChange(mActiveDevice);
+                if (wasMuted) {
+                    mAudioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC,
+                                                     AudioManager.ADJUST_UNMUTE, 0);
+                }
             }
         }
         return true;
@@ -545,10 +581,11 @@ public class A2dpService extends ProfileService {
         return priority;
     }
 
-    /* Absolute volume implementation */
     public boolean isAvrcpAbsoluteVolumeSupported() {
-        return mAvrcp.isAbsoluteVolumeSupported();
+        // TODO (apanicke): Add a hook here for the AvrcpTargetService.
+        return false;
     }
+
 
     public void setAvrcpAbsoluteVolume(int volume) {
         // TODO (apanicke): Instead of using A2DP as a middleman for volume changes, add a binder
@@ -556,18 +593,6 @@ public class A2dpService extends ProfileService {
         if (AvrcpTargetService.get() != null) {
             AvrcpTargetService.get().sendVolumeChanged(volume);
             return;
-        }
-
-        mAvrcp.setAbsoluteVolume(volume);
-    }
-
-    public void setAvrcpAudioState(int state) {
-        mAvrcp.setA2dpAudioState(state);
-    }
-
-    public void resetAvrcpBlacklist(BluetoothDevice device) {
-        if (mAvrcp != null) {
-            mAvrcp.resetBlackList(device.getAddress());
         }
     }
 
@@ -801,16 +826,6 @@ public class A2dpService extends ProfileService {
     private void broadcastActiveDevice(BluetoothDevice device) {
         if (DBG) {
             Log.d(TAG, "broadcastActiveDevice(" + device + ")");
-        }
-
-        // Currently the audio service can only remember the volume for a single device. We send
-        // active device changed intent after informing AVRCP that the device switched so it can
-        // set the stream volume to the new device before A2DP informs the audio service that the
-        // device has changed. This is to avoid the indeterminate volume state that exists when
-        // in the middle of switching devices.
-        if (AvrcpTargetService.get() != null) {
-            AvrcpTargetService.get().volumeDeviceSwitched(
-                    device != null ? device.getAddress() : "");
         }
 
         Intent intent = new Intent(BluetoothA2dp.ACTION_ACTIVE_DEVICE_CHANGED);
@@ -1181,9 +1196,6 @@ public class A2dpService extends ProfileService {
         ProfileService.println(sb, "mActiveDevice: " + mActiveDevice);
         for (A2dpStateMachine sm : mStateMachines.values()) {
             sm.dump(sb);
-        }
-        if (mAvrcp != null) {
-            mAvrcp.dump(sb);
         }
     }
 }
