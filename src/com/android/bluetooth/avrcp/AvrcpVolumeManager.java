@@ -32,7 +32,7 @@ import java.util.Map;
 import java.util.Objects;
 
 class AvrcpVolumeManager extends AudioDeviceCallback {
-    public static final String TAG = "NewAvrcpVolumeManager";
+    public static final String TAG = "AvrcpVolumeManager";
     public static final boolean DEBUG = true;
 
     // All volumes are stored at system volume values, not AVRCP values
@@ -115,7 +115,7 @@ class AvrcpVolumeManager extends AudioDeviceCallback {
         volumeMapEditor.apply();
     }
 
-    void storeVolumeForDevice(BluetoothDevice device) {
+    synchronized void storeVolumeForDevice(BluetoothDevice device) {
         SharedPreferences.Editor pref = getVolumeMap().edit();
         int storeVolume =  mAudioManager.getStreamVolume(STREAM_MUSIC);
         Log.i(TAG, "storeVolume: Storing stream volume level for device " + device
@@ -128,7 +128,7 @@ class AvrcpVolumeManager extends AudioDeviceCallback {
         pref.apply();
     }
 
-    int getVolume(@NonNull BluetoothDevice device, int defaultValue) {
+    synchronized int getVolume(@NonNull BluetoothDevice device, int defaultValue) {
         if (!mVolumeMap.containsKey(device)) {
             Log.w(TAG, "getVolume: Couldn't find volume preference for device: " + device);
             return defaultValue;
@@ -195,7 +195,7 @@ class AvrcpVolumeManager extends AudioDeviceCallback {
         mCurrentDevice = device;
     }
 
-    void deviceDisconnected(@NonNull BluetoothDevice device) {
+    synchronized void deviceDisconnected(@NonNull BluetoothDevice device) {
         d("deviceDisconnected: device=" + device);
         mDeviceMap.remove(device);
     }

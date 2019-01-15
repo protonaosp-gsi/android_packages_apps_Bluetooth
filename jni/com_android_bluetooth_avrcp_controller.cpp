@@ -24,6 +24,7 @@
 #include "utils/Log.h"
 
 #include <string.h>
+#include <shared_mutex>
 
 namespace android {
 static jmethodID method_handlePassthroughRsp;
@@ -47,18 +48,25 @@ static jmethodID method_handleChangeFolderRsp;
 static jmethodID method_handleSetBrowsedPlayerRsp;
 static jmethodID method_handleSetAddressedPlayerRsp;
 static jmethodID method_handleAddressedPlayerChanged;
+static jmethodID method_handleNowPlayingContentChanged;
 
 static jclass class_MediaBrowser_MediaItem;
 static jclass class_AvrcpPlayer;
 
 static const btrc_ctrl_interface_t* sBluetoothAvrcpInterface = NULL;
 static jobject sCallbacksObj = NULL;
+static std::shared_timed_mutex sCallbacks_mutex;
 
 static void btavrcp_passthrough_response_callback(const RawAddress& bd_addr,
                                                   int id, int pressed) {
   ALOGI("%s: id: %d, pressed: %d", __func__, id, pressed);
+  std::shared_lock<std::shared_timed_mutex> lock(sCallbacks_mutex);
   CallbackEnv sCallbackEnv(__func__);
   if (!sCallbackEnv.valid()) return;
+  if (!sCallbacksObj) {
+    ALOGE("%s: sCallbacksObj is null", __func__);
+    return;
+  }
 
   ScopedLocalRef<jbyteArray> addr(
       sCallbackEnv.get(), sCallbackEnv->NewByteArray(sizeof(RawAddress)));
@@ -75,8 +83,13 @@ static void btavrcp_passthrough_response_callback(const RawAddress& bd_addr,
 
 static void btavrcp_groupnavigation_response_callback(int id, int pressed) {
   ALOGV("%s", __func__);
+  std::shared_lock<std::shared_timed_mutex> lock(sCallbacks_mutex);
   CallbackEnv sCallbackEnv(__func__);
   if (!sCallbackEnv.valid()) return;
+  if (!sCallbacksObj) {
+    ALOGE("%s: sCallbacksObj is null", __func__);
+    return;
+  }
 
   sCallbackEnv->CallVoidMethod(sCallbacksObj, method_handleGroupNavigationRsp,
                                (jint)id, (jint)pressed);
@@ -85,8 +98,13 @@ static void btavrcp_groupnavigation_response_callback(int id, int pressed) {
 static void btavrcp_connection_state_callback(bool rc_connect, bool br_connect,
                                               const RawAddress& bd_addr) {
   ALOGI("%s: conn state: rc: %d br: %d", __func__, rc_connect, br_connect);
+  std::shared_lock<std::shared_timed_mutex> lock(sCallbacks_mutex);
   CallbackEnv sCallbackEnv(__func__);
   if (!sCallbackEnv.valid()) return;
+  if (!sCallbacksObj) {
+    ALOGE("%s: sCallbacksObj is null", __func__);
+    return;
+  }
 
   ScopedLocalRef<jbyteArray> addr(
       sCallbackEnv.get(), sCallbackEnv->NewByteArray(sizeof(RawAddress)));
@@ -105,8 +123,13 @@ static void btavrcp_connection_state_callback(bool rc_connect, bool br_connect,
 static void btavrcp_get_rcfeatures_callback(const RawAddress& bd_addr,
                                             int features) {
   ALOGV("%s", __func__);
+  std::shared_lock<std::shared_timed_mutex> lock(sCallbacks_mutex);
   CallbackEnv sCallbackEnv(__func__);
   if (!sCallbackEnv.valid()) return;
+  if (!sCallbacksObj) {
+    ALOGE("%s: sCallbacksObj is null", __func__);
+    return;
+  }
 
   ScopedLocalRef<jbyteArray> addr(
       sCallbackEnv.get(), sCallbackEnv->NewByteArray(sizeof(RawAddress)));
@@ -124,8 +147,13 @@ static void btavrcp_get_rcfeatures_callback(const RawAddress& bd_addr,
 static void btavrcp_setplayerapplicationsetting_rsp_callback(
     const RawAddress& bd_addr, uint8_t accepted) {
   ALOGV("%s", __func__);
+  std::shared_lock<std::shared_timed_mutex> lock(sCallbacks_mutex);
   CallbackEnv sCallbackEnv(__func__);
   if (!sCallbackEnv.valid()) return;
+  if (!sCallbacksObj) {
+    ALOGE("%s: sCallbacksObj is null", __func__);
+    return;
+  }
 
   ScopedLocalRef<jbyteArray> addr(
       sCallbackEnv.get(), sCallbackEnv->NewByteArray(sizeof(RawAddress)));
@@ -145,8 +173,13 @@ static void btavrcp_playerapplicationsetting_callback(
     btrc_player_app_attr_t* app_attrs, uint8_t num_ext_attr,
     btrc_player_app_ext_attr_t* ext_attrs) {
   ALOGI("%s", __func__);
+  std::shared_lock<std::shared_timed_mutex> lock(sCallbacks_mutex);
   CallbackEnv sCallbackEnv(__func__);
   if (!sCallbackEnv.valid()) return;
+  if (!sCallbacksObj) {
+    ALOGE("%s: sCallbacksObj is null", __func__);
+    return;
+  }
 
   ScopedLocalRef<jbyteArray> addr(
       sCallbackEnv.get(), sCallbackEnv->NewByteArray(sizeof(RawAddress)));
@@ -192,8 +225,13 @@ static void btavrcp_playerapplicationsetting_callback(
 static void btavrcp_playerapplicationsetting_changed_callback(
     const RawAddress& bd_addr, const btrc_player_settings_t& vals) {
   ALOGI("%s", __func__);
+  std::shared_lock<std::shared_timed_mutex> lock(sCallbacks_mutex);
   CallbackEnv sCallbackEnv(__func__);
   if (!sCallbackEnv.valid()) return;
+  if (!sCallbacksObj) {
+    ALOGE("%s: sCallbacksObj is null", __func__);
+    return;
+  }
 
   ScopedLocalRef<jbyteArray> addr(
       sCallbackEnv.get(), sCallbackEnv->NewByteArray(sizeof(RawAddress)));
@@ -230,8 +268,13 @@ static void btavrcp_playerapplicationsetting_changed_callback(
 static void btavrcp_set_abs_vol_cmd_callback(const RawAddress& bd_addr,
                                              uint8_t abs_vol, uint8_t label) {
   ALOGI("%s", __func__);
+  std::shared_lock<std::shared_timed_mutex> lock(sCallbacks_mutex);
   CallbackEnv sCallbackEnv(__func__);
   if (!sCallbackEnv.valid()) return;
+  if (!sCallbacksObj) {
+    ALOGE("%s: sCallbacksObj is null", __func__);
+    return;
+  }
 
   ScopedLocalRef<jbyteArray> addr(
       sCallbackEnv.get(), sCallbackEnv->NewByteArray(sizeof(RawAddress)));
@@ -249,8 +292,13 @@ static void btavrcp_set_abs_vol_cmd_callback(const RawAddress& bd_addr,
 static void btavrcp_register_notification_absvol_callback(
     const RawAddress& bd_addr, uint8_t label) {
   ALOGI("%s", __func__);
+  std::shared_lock<std::shared_timed_mutex> lock(sCallbacks_mutex);
   CallbackEnv sCallbackEnv(__func__);
   if (!sCallbackEnv.valid()) return;
+  if (!sCallbacksObj) {
+    ALOGE("%s: sCallbacksObj is null", __func__);
+    return;
+  }
 
   ScopedLocalRef<jbyteArray> addr(
       sCallbackEnv.get(), sCallbackEnv->NewByteArray(sizeof(RawAddress)));
@@ -274,8 +322,13 @@ static void btavrcp_track_changed_callback(const RawAddress& bd_addr,
    * Assuming text feild to be null terminated.
    */
   ALOGI("%s", __func__);
+  std::shared_lock<std::shared_timed_mutex> lock(sCallbacks_mutex);
   CallbackEnv sCallbackEnv(__func__);
   if (!sCallbackEnv.valid()) return;
+  if (!sCallbacksObj) {
+    ALOGE("%s: sCallbacksObj is null", __func__);
+    return;
+  }
 
   ScopedLocalRef<jbyteArray> addr(
       sCallbackEnv.get(), sCallbackEnv->NewByteArray(sizeof(RawAddress)));
@@ -324,8 +377,13 @@ static void btavrcp_play_position_changed_callback(const RawAddress& bd_addr,
                                                    uint32_t song_len,
                                                    uint32_t song_pos) {
   ALOGI("%s", __func__);
+  std::shared_lock<std::shared_timed_mutex> lock(sCallbacks_mutex);
   CallbackEnv sCallbackEnv(__func__);
   if (!sCallbackEnv.valid()) return;
+  if (!sCallbacksObj) {
+    ALOGE("%s: sCallbacksObj is null", __func__);
+    return;
+  }
 
   ScopedLocalRef<jbyteArray> addr(
       sCallbackEnv.get(), sCallbackEnv->NewByteArray(sizeof(RawAddress)));
@@ -342,8 +400,13 @@ static void btavrcp_play_position_changed_callback(const RawAddress& bd_addr,
 static void btavrcp_play_status_changed_callback(
     const RawAddress& bd_addr, btrc_play_status_t play_status) {
   ALOGI("%s", __func__);
+  std::shared_lock<std::shared_timed_mutex> lock(sCallbacks_mutex);
   CallbackEnv sCallbackEnv(__func__);
   if (!sCallbackEnv.valid()) return;
+  if (!sCallbacksObj) {
+    ALOGE("%s: sCallbacksObj is null", __func__);
+    return;
+  }
 
   ScopedLocalRef<jbyteArray> addr(
       sCallbackEnv.get(), sCallbackEnv->NewByteArray(sizeof(RawAddress)));
@@ -365,8 +428,13 @@ static void btavrcp_get_folder_items_callback(
    * counterparts by calling the java constructor for each of the items.
    */
   ALOGV("%s count %d", __func__, count);
+  std::shared_lock<std::shared_timed_mutex> lock(sCallbacks_mutex);
   CallbackEnv sCallbackEnv(__func__);
   if (!sCallbackEnv.valid()) return;
+  if (!sCallbacksObj) {
+    ALOGE("%s: sCallbacksObj is null", __func__);
+    return;
+  }
 
   // Inspect if the first element is a folder/item or player listing. They are
   // always exclusive.
@@ -551,8 +619,13 @@ static void btavrcp_get_folder_items_callback(
 static void btavrcp_change_path_callback(const RawAddress& bd_addr,
                                          uint32_t count) {
   ALOGI("%s count %d", __func__, count);
+  std::shared_lock<std::shared_timed_mutex> lock(sCallbacks_mutex);
   CallbackEnv sCallbackEnv(__func__);
   if (!sCallbackEnv.valid()) return;
+  if (!sCallbacksObj) {
+    ALOGE("%s: sCallbacksObj is null", __func__);
+    return;
+  }
 
   sCallbackEnv->CallVoidMethod(sCallbacksObj, method_handleChangeFolderRsp,
                                (jint)count);
@@ -562,8 +635,13 @@ static void btavrcp_set_browsed_player_callback(const RawAddress& bd_addr,
                                                 uint8_t num_items,
                                                 uint8_t depth) {
   ALOGI("%s items %d depth %d", __func__, num_items, depth);
+  std::shared_lock<std::shared_timed_mutex> lock(sCallbacks_mutex);
   CallbackEnv sCallbackEnv(__func__);
   if (!sCallbackEnv.valid()) return;
+  if (!sCallbacksObj) {
+    ALOGE("%s: sCallbacksObj is null", __func__);
+    return;
+  }
 
   sCallbackEnv->CallVoidMethod(sCallbacksObj, method_handleSetBrowsedPlayerRsp,
                                (jint)num_items, (jint)depth);
@@ -572,9 +650,13 @@ static void btavrcp_set_browsed_player_callback(const RawAddress& bd_addr,
 static void btavrcp_set_addressed_player_callback(const RawAddress& bd_addr,
                                                   uint8_t status) {
   ALOGI("%s status %d", __func__, status);
-
+  std::shared_lock<std::shared_timed_mutex> lock(sCallbacks_mutex);
   CallbackEnv sCallbackEnv(__func__);
   if (!sCallbackEnv.valid()) return;
+  if (!sCallbacksObj) {
+    ALOGE("%s: sCallbacksObj is null", __func__);
+    return;
+  }
 
   sCallbackEnv->CallVoidMethod(
       sCallbacksObj, method_handleSetAddressedPlayerRsp, (jint)status);
@@ -583,12 +665,27 @@ static void btavrcp_set_addressed_player_callback(const RawAddress& bd_addr,
 static void btavrcp_addressed_player_changed_callback(const RawAddress& bd_addr,
                                                       uint16_t id) {
   ALOGI("%s status %d", __func__, id);
+  std::shared_lock<std::shared_timed_mutex> lock(sCallbacks_mutex);
+  CallbackEnv sCallbackEnv(__func__);
+  if (!sCallbackEnv.valid()) return;
+  if (!sCallbacksObj) {
+    ALOGE("%s: sCallbacksObj is null", __func__);
+    return;
+  }
+
+  sCallbackEnv->CallVoidMethod(sCallbacksObj,
+                               method_handleAddressedPlayerChanged, (jint)id);
+}
+
+static void btavrcp_now_playing_content_changed_callback(
+    const RawAddress& bd_addr) {
+  ALOGI("%s", __func__);
 
   CallbackEnv sCallbackEnv(__func__);
   if (!sCallbackEnv.valid()) return;
 
   sCallbackEnv->CallVoidMethod(sCallbacksObj,
-                               method_handleAddressedPlayerChanged, (jint)id);
+                               method_handleNowPlayingContentChanged);
 }
 
 static btrc_ctrl_callbacks_t sBluetoothAvrcpCallbacks = {
@@ -609,7 +706,8 @@ static btrc_ctrl_callbacks_t sBluetoothAvrcpCallbacks = {
     btavrcp_change_path_callback,
     btavrcp_set_browsed_player_callback,
     btavrcp_set_addressed_player_callback,
-    btavrcp_addressed_player_changed_callback};
+    btavrcp_addressed_player_changed_callback,
+    btavrcp_now_playing_content_changed_callback};
 
 static void classInitNative(JNIEnv* env, jclass clazz) {
   method_handlePassthroughRsp =
@@ -673,11 +771,15 @@ static void classInitNative(JNIEnv* env, jclass clazz) {
       env->GetMethodID(clazz, "handleSetAddressedPlayerRsp", "(I)V");
   method_handleAddressedPlayerChanged =
       env->GetMethodID(clazz, "handleAddressedPlayerChanged", "(I)V");
+  method_handleNowPlayingContentChanged =
+      env->GetMethodID(clazz, "handleNowPlayingContentChanged", "()V");
 
   ALOGI("%s: succeeds", __func__);
 }
 
 static void initNative(JNIEnv* env, jobject object) {
+  std::unique_lock<std::shared_timed_mutex> lock(sCallbacks_mutex);
+
   jclass tmpMediaItem =
       env->FindClass("android/media/browse/MediaBrowser$MediaItem");
   class_MediaBrowser_MediaItem = (jclass)env->NewGlobalRef(tmpMediaItem);
@@ -725,6 +827,8 @@ static void initNative(JNIEnv* env, jobject object) {
 }
 
 static void cleanupNative(JNIEnv* env, jobject object) {
+  std::unique_lock<std::shared_timed_mutex> lock(sCallbacks_mutex);
+
   const bt_interface_t* btInf = getBluetoothInterface();
   if (btInf == NULL) {
     ALOGE("Bluetooth module is not loaded");
