@@ -26,13 +26,13 @@ import android.os.Looper;
 import android.os.Message;
 import android.os.SystemClock;
 import android.os.UserHandle;
-import android.support.annotation.VisibleForTesting;
 import android.telephony.PhoneNumberUtils;
 import android.telephony.PhoneStateListener;
 import android.util.Log;
 
 import com.android.bluetooth.btservice.AdapterService;
 import com.android.bluetooth.btservice.ProfileService;
+import com.android.internal.annotations.VisibleForTesting;
 import com.android.internal.util.State;
 import com.android.internal.util.StateMachine;
 
@@ -527,8 +527,9 @@ public class HeadsetStateMachine extends StateMachine {
     }
 
     // Per HFP 1.7.1 spec page 23/144, Pending state needs to handle
-    //      AT+BRSF, AT+CIND, AT+CMER, AT+BIND, +CHLD
+    //      AT+BRSF, AT+CIND, AT+CMER, AT+BIND, AT+CHLD
     // commands during SLC establishment
+    // AT+CHLD=? will be handled by statck directly
     class Connecting extends HeadsetStateBase {
         @Override
         int getConnectionStateInt() {
@@ -584,9 +585,6 @@ public class HeadsetStateMachine extends StateMachine {
                     switch (event.type) {
                         case HeadsetStackEvent.EVENT_TYPE_CONNECTION_STATE_CHANGED:
                             processConnectionEvent(message, event.valueInt);
-                            break;
-                        case HeadsetStackEvent.EVENT_TYPE_AT_CHLD:
-                            processAtChld(event.valueInt, event.device);
                             break;
                         case HeadsetStackEvent.EVENT_TYPE_AT_CIND:
                             processAtCind(event.device);
@@ -1011,9 +1009,6 @@ public class HeadsetStateMachine extends StateMachine {
         @Override
         public void enter() {
             super.enter();
-            if (mConnectingTimestampMs == Long.MIN_VALUE) {
-                mConnectingTimestampMs = SystemClock.uptimeMillis();
-            }
             if (mPrevState == mConnecting) {
                 // Reset AG indicator subscriptions, HF can set this later using AT+BIA command
                 updateAgIndicatorEnableState(DEFAULT_AG_INDICATOR_ENABLE_STATE);
@@ -1880,19 +1875,15 @@ public class HeadsetStateMachine extends StateMachine {
     private void processAtBind(String atString, BluetoothDevice device) {
         log("processAtBind: " + atString);
 
-        // Parse the AT String to find the Indicator Ids that are supported
-        int indId = 0;
-        int iter = 0;
-        int iter1 = 0;
+        for (String id : atString.split(",")) {
 
-        while (iter < atString.length()) {
-            iter1 = findChar(',', atString, iter);
-            String id = atString.substring(iter, iter1);
+            int indId;
 
             try {
-                indId = Integer.valueOf(id);
+                indId = Integer.parseInt(id);
             } catch (NumberFormatException e) {
                 Log.e(TAG, Log.getStackTraceString(new Throwable()));
+                continue;
             }
 
             switch (indId) {
@@ -1908,8 +1899,6 @@ public class HeadsetStateMachine extends StateMachine {
                     log("Invalid HF Indicator Received");
                     break;
             }
-
-            iter = iter1 + 1; // move past comma
         }
     }
 

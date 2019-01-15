@@ -25,7 +25,7 @@ import android.util.Log;
  * methods to allow Google Play Music to match the default behaviour of MediaPlayerWrapper.
  */
 class GPMWrapper extends MediaPlayerWrapper {
-    private static final String TAG = "NewAvrcpGPMWrapper";
+    private static final String TAG = "AvrcpGPMWrapper";
     private static final boolean DEBUG = true;
 
     @Override
@@ -50,8 +50,8 @@ class GPMWrapper extends MediaPlayerWrapper {
         if (currItem == null || !qitem.equals(mdata)) {
             if (DEBUG) {
                 Log.d(TAG, "Metadata currently out of sync for Google Play Music");
-                Log.d(TAG, "  └ Current queueItem: " + currItem);
-                Log.d(TAG, "  └ Current metadata : " + getMetadata());
+                Log.d(TAG, "  └ Current queueItem: " + qitem);
+                Log.d(TAG, "  └ Current metadata : " + mdata);
             }
             return false;
         }

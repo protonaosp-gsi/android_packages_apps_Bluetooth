@@ -43,7 +43,7 @@ import java.util.Objects;
  * @hide
  */
 public class AvrcpTargetService extends ProfileService {
-    private static final String TAG = "NewAvrcpTargetService";
+    private static final String TAG = "AvrcpTargetService";
     private static final boolean DEBUG = true;
     private static final String AVRCP_ENABLE_PROPERTY = "persist.bluetooth.enablenewavrcp";
 
@@ -146,25 +146,25 @@ public class AvrcpTargetService extends ProfileService {
             return true;
         }
 
-        mReceiver = new AvrcpBroadcastReceiver();
-        IntentFilter filter = new IntentFilter();
-        filter.addAction(BluetoothA2dp.ACTION_ACTIVE_DEVICE_CHANGED);
-        registerReceiver(mReceiver, filter);
-
         mAudioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
         sDeviceMaxVolume = mAudioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
 
         mMediaPlayerList = new MediaPlayerList(Looper.myLooper(), this);
+
+        mNativeInterface = AvrcpNativeInterface.getInterface();
+        mNativeInterface.init(AvrcpTargetService.this);
+
+        mVolumeManager = new AvrcpVolumeManager(this, mAudioManager, mNativeInterface);
 
         UserManager userManager = UserManager.get(getApplicationContext());
         if (userManager.isUserUnlocked()) {
             mMediaPlayerList.init(new ListCallback());
         }
 
-        mNativeInterface = AvrcpNativeInterface.getInterface();
-        mNativeInterface.init(AvrcpTargetService.this);
-
-        mVolumeManager = new AvrcpVolumeManager(this, mAudioManager, mNativeInterface);
+        mReceiver = new AvrcpBroadcastReceiver();
+        IntentFilter filter = new IntentFilter();
+        filter.addAction(BluetoothA2dp.ACTION_ACTIVE_DEVICE_CHANGED);
+        registerReceiver(mReceiver, filter);
 
         // Only allow the service to be used once it is initialized
         sInstance = this;

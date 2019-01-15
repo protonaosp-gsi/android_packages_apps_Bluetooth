@@ -53,10 +53,10 @@ import android.bluetooth.BluetoothProfile;
 import android.content.Intent;
 import android.os.Looper;
 import android.os.Message;
-import android.support.annotation.VisibleForTesting;
 import android.util.Log;
 
 import com.android.bluetooth.btservice.ProfileService;
+import com.android.internal.annotations.VisibleForTesting;
 import com.android.internal.util.State;
 import com.android.internal.util.StateMachine;
 
@@ -748,7 +748,6 @@ final class A2dpStateMachine extends StateMachine {
                 ProfileService.println(sb, "  mCodecConfig: " + mCodecStatus.getCodecConfig());
             }
         }
-        ProfileService.println(sb, "  StateMachine: " + this);
         // Dump the state machine logs
         StringWriter stringWriter = new StringWriter();
         PrintWriter printWriter = new PrintWriter(stringWriter);
