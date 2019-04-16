@@ -66,8 +66,6 @@ import android.util.Slog;
 import android.util.SparseArray;
 import android.util.StatsLog;
 
-import androidx.room.Room;
-
 import com.android.bluetooth.BluetoothMetricsProto;
 import com.android.bluetooth.Utils;
 import com.android.bluetooth.btservice.RemoteDevices.DeviceProperties;
@@ -312,7 +310,6 @@ public class AdapterService extends Service {
                         mAdapterStateMachine.sendMessage(AdapterState.BREDR_STOPPED);
                     } else if (mRunningProfiles.size() == 0) {
                         disableNative();
-                        mAdapterStateMachine.sendMessage(AdapterState.BLE_STOPPED);
                     }
                     break;
                 default:
@@ -426,9 +423,7 @@ public class AdapterService extends Service {
         mActiveDeviceManager.start();
 
         mDatabaseManager = new DatabaseManager(this);
-        MetadataDatabase database = Room.databaseBuilder(this,
-                MetadataDatabase.class, MetadataDatabase.DATABASE_NAME).build();
-        mDatabaseManager.start(database);
+        mDatabaseManager.start(MetadataDatabase.createDatabase(this));
 
         mSilenceDeviceManager = new SilenceDeviceManager(this, new ServiceFactory(),
                 Looper.getMainLooper());
@@ -549,6 +544,7 @@ public class AdapterService extends Service {
     void stateChangeCallback(int status) {
         if (status == AbstractionLayer.BT_STATE_OFF) {
             debugLog("stateChangeCallback: disableNative() completed");
+            mAdapterStateMachine.sendMessage(AdapterState.BLE_STOPPED);
         } else if (status == AbstractionLayer.BT_STATE_ON) {
             mAdapterStateMachine.sendMessage(AdapterState.BLE_STARTED);
         } else {
@@ -1683,7 +1679,7 @@ public class AdapterService extends Service {
         }
 
         @Override
-        public boolean setMetadata(BluetoothDevice device, int key, String value) {
+        public boolean setMetadata(BluetoothDevice device, int key, byte[] value) {
             AdapterService service = getService();
             if (service == null) {
                 return false;
@@ -1692,7 +1688,7 @@ public class AdapterService extends Service {
         }
 
         @Override
-        public String getMetadata(BluetoothDevice device, int key) {
+        public byte[] getMetadata(BluetoothDevice device, int key) {
             AdapterService service = getService();
             if (service == null) {
                 return null;
@@ -2048,6 +2044,18 @@ public class AdapterService extends Service {
         for (BluetoothDevice device : bondedDevices) {
             mRemoteDevices.updateUuids(device);
         }
+    }
+
+    /**
+     * Update device UUID changed to {@link BondStateMachine}
+     *
+     * @param device remote device of interest
+     */
+    public void deviceUuidUpdated(BluetoothDevice device) {
+        // Notify BondStateMachine for SDP complete / UUID changed.
+        Message msg = mBondStateMachine.obtainMessage(BondStateMachine.UUID_UPDATE);
+        msg.obj = device;
+        mBondStateMachine.sendMessage(msg);
     }
 
     boolean cancelBondProcess(BluetoothDevice device) {
@@ -2695,15 +2703,15 @@ public class AdapterService extends Service {
         return true;
     }
 
-    boolean setMetadata(BluetoothDevice device, int key, String value) {
-        if (value.length() > BluetoothDevice.METADATA_MAX_LENGTH) {
-            Log.e(TAG, "setMetadata: value length too long " + value.length());
+    boolean setMetadata(BluetoothDevice device, int key, byte[] value) {
+        if (value.length > BluetoothDevice.METADATA_MAX_LENGTH) {
+            Log.e(TAG, "setMetadata: value length too long " + value.length);
             return false;
         }
         return mDatabaseManager.setCustomMeta(device, key, value);
     }
 
-    String getMetadata(BluetoothDevice device, int key) {
+    byte[] getMetadata(BluetoothDevice device, int key) {
         return mDatabaseManager.getCustomMeta(device, key);
     }
 
@@ -2711,8 +2719,8 @@ public class AdapterService extends Service {
      * Update metadata change to registered listeners
      */
     @VisibleForTesting
-    public void metadataChanged(String address, int key, String value) {
-        BluetoothDevice device = mRemoteDevices.getDevice(address.getBytes());
+    public void metadataChanged(String address, int key, byte[] value) {
+        BluetoothDevice device = mRemoteDevices.getDevice(Utils.getBytesFromAddress(address));
         if (mMetadataListeners.containsKey(device)) {
             ArrayList<IBluetoothMetadataListener> list = mMetadataListeners.get(device);
             for (IBluetoothMetadataListener listener : list) {
