@@ -34,10 +34,10 @@ import android.util.StatsLog;
 
 import com.android.bluetooth.BluetoothMetricsProto;
 import com.android.bluetooth.Utils;
-import com.android.bluetooth.avrcp.AvrcpTargetService;
 import com.android.bluetooth.btservice.AdapterService;
 import com.android.bluetooth.btservice.MetricsLogger;
 import com.android.bluetooth.btservice.ProfileService;
+import com.android.bluetooth.btservice.ServiceFactory;
 import com.android.internal.annotations.GuardedBy;
 import com.android.internal.annotations.VisibleForTesting;
 
@@ -62,6 +62,8 @@ public class A2dpService extends ProfileService {
 
     @VisibleForTesting
     A2dpNativeInterface mA2dpNativeInterface;
+    @VisibleForTesting
+    ServiceFactory mFactory = new ServiceFactory();
     private AudioManager mAudioManager;
     private A2dpCodecConfig mA2dpCodecConfig;
 
@@ -154,11 +156,6 @@ public class A2dpService extends ProfileService {
         if (sA2dpService == null) {
             Log.w(TAG, "stop() called before start()");
             return true;
-        }
-
-        // Step 10: Store volume if there is an active device
-        if (mActiveDevice != null && AvrcpTargetService.get() != null) {
-            AvrcpTargetService.get().storeVolumeForDevice(mActiveDevice);
         }
 
         // Step 9: Clear active device and stop playing audio
@@ -354,24 +351,18 @@ public class A2dpService extends ProfileService {
             return false;
         }
         // Check priority and accept or reject the connection.
-        // Note: Logic can be simplified, but keeping it this way for readability
         int priority = getPriority(device);
         int bondState = mAdapterService.getBondState(device);
-        // If priority is undefined, it is likely that service discovery has not completed and peer
-        // initiated the connection. Allow this connection only if the device is bonded or bonding
-        boolean serviceDiscoveryPending = (priority == BluetoothProfile.PRIORITY_UNDEFINED)
-                && (bondState == BluetoothDevice.BOND_BONDING
-                || bondState == BluetoothDevice.BOND_BONDED);
-        // Also allow connection when device is bonded/bonding and priority is ON/AUTO_CONNECT.
-        boolean isEnabled = (priority == BluetoothProfile.PRIORITY_ON
-                || priority == BluetoothProfile.PRIORITY_AUTO_CONNECT)
-                && (bondState == BluetoothDevice.BOND_BONDED
-                || bondState == BluetoothDevice.BOND_BONDING);
-        if (!serviceDiscoveryPending && !isEnabled) {
-            // Otherwise, reject the connection if no service discovery is pending and priority is
-            // neither PRIORITY_ON nor PRIORITY_AUTO_CONNECT
-            Log.w(TAG, "okToConnect: return false, priority=" + priority + ", bondState="
-                    + bondState);
+        // Allow this connection only if the device is bonded. Any attempt to connect while
+        // bonding would potentially lead to an unauthorized connection.
+        if (bondState != BluetoothDevice.BOND_BONDED) {
+            Log.w(TAG, "okToConnect: return false, bondState=" + bondState);
+            return false;
+        } else if (priority != BluetoothProfile.PRIORITY_UNDEFINED
+                && priority != BluetoothProfile.PRIORITY_ON
+                && priority != BluetoothProfile.PRIORITY_AUTO_CONNECT) {
+            // Otherwise, reject the connection if priority is not valid.
+            Log.w(TAG, "okToConnect: return false, priority=" + priority);
             return false;
         }
         return true;
@@ -436,9 +427,19 @@ public class A2dpService extends ProfileService {
         }
     }
 
+    private void storeActiveDeviceVolume() {
+        // Make sure volume has been stored before been removed from active.
+        if (mFactory.getAvrcpTargetService() != null && mActiveDevice != null) {
+            mFactory.getAvrcpTargetService().storeVolumeForDevice(mActiveDevice);
+        }
+    }
+
     private void removeActiveDevice(boolean forceStopPlayingAudio) {
         BluetoothDevice previousActiveDevice = mActiveDevice;
         synchronized (mStateMachines) {
+            // Make sure volume has been store before device been remove from active.
+            storeActiveDeviceVolume();
+
             // This needs to happen before we inform the audio manager that the device
             // disconnected. Please see comment in updateAndBroadcastActiveDevice() for why.
             updateAndBroadcastActiveDevice(null);
@@ -480,9 +481,6 @@ public class A2dpService extends ProfileService {
             Log.d(TAG, "setSilenceMode(" + device + "): " + silence);
         }
         if (silence && Objects.equals(mActiveDevice, device)) {
-            if (mActiveDevice != null && AvrcpTargetService.get() != null) {
-                AvrcpTargetService.get().storeVolumeForDevice(mActiveDevice);
-            }
             removeActiveDevice(true);
         } else if (!silence && mActiveDevice == null) {
             // Set the device as the active device if currently no active device.
@@ -493,6 +491,22 @@ public class A2dpService extends ProfileService {
             return false;
         }
         return true;
+    }
+
+    /**
+     * Early notification that Hearing Aids will be the active device. This allows the A2DP to save
+     * its volume before the Audio Service starts changing its media stream.
+     */
+    public void earlyNotifyHearingAidActive() {
+        enforceCallingOrSelfPermission(BLUETOOTH_ADMIN_PERM, "Need BLUETOOTH ADMIN permission");
+
+        synchronized (mStateMachines) {
+            // Switch active device from A2DP to Hearing Aids.
+            if (DBG) {
+                Log.d(TAG, "earlyNotifyHearingAidActive: Save volume for " + mActiveDevice);
+            }
+            storeActiveDeviceVolume();
+        }
     }
 
     /**
@@ -534,6 +548,14 @@ public class A2dpService extends ProfileService {
             codecStatus = sm.getCodecStatus();
 
             boolean deviceChanged = !Objects.equals(device, mActiveDevice);
+            if (deviceChanged) {
+                // Switch from one A2DP to another A2DP device
+                if (DBG) {
+                    Log.d(TAG, "Switch A2DP devices to " + device + " from " + mActiveDevice);
+                }
+                storeActiveDeviceVolume();
+            }
+
             // This needs to happen before we inform the audio manager that the device
             // disconnected. Please see comment in updateAndBroadcastActiveDevice() for why.
             updateAndBroadcastActiveDevice(device);
@@ -558,8 +580,8 @@ public class A2dpService extends ProfileService {
                 }
 
                 int rememberedVolume = -1;
-                if (AvrcpTargetService.get() != null) {
-                    rememberedVolume = AvrcpTargetService.get()
+                if (mFactory.getAvrcpTargetService() != null) {
+                    rememberedVolume = mFactory.getAvrcpTargetService()
                             .getRememberedVolumeForDevice(mActiveDevice);
                 }
 
@@ -623,8 +645,8 @@ public class A2dpService extends ProfileService {
     public void setAvrcpAbsoluteVolume(int volume) {
         // TODO (apanicke): Instead of using A2DP as a middleman for volume changes, add a binder
         // service to the new AVRCP Profile and have the audio manager use that instead.
-        if (AvrcpTargetService.get() != null) {
-            AvrcpTargetService.get().sendVolumeChanged(volume);
+        if (mFactory.getAvrcpTargetService() != null) {
+            mFactory.getAvrcpTargetService().sendVolumeChanged(volume);
             return;
         }
     }
@@ -693,7 +715,17 @@ public class A2dpService extends ProfileService {
             Log.e(TAG, "Cannot set codec config preference: no active A2DP device");
             return;
         }
-        mA2dpCodecConfig.setCodecConfigPreference(device, codecConfig);
+        if (getSupportsOptionalCodecs(device) != BluetoothA2dp.OPTIONAL_CODECS_SUPPORTED) {
+            Log.e(TAG, "Cannot set codec config preference: not supported");
+            return;
+        }
+
+        BluetoothCodecStatus codecStatus = getCodecStatus(device);
+        if (codecStatus == null) {
+            Log.e(TAG, "Codec status is null on " + device);
+            return;
+        }
+        mA2dpCodecConfig.setCodecConfigPreference(device, codecStatus, codecConfig);
     }
 
     /**
@@ -715,7 +747,16 @@ public class A2dpService extends ProfileService {
             Log.e(TAG, "Cannot enable optional codecs: no active A2DP device");
             return;
         }
-        mA2dpCodecConfig.enableOptionalCodecs(device);
+        if (getSupportsOptionalCodecs(device) != BluetoothA2dp.OPTIONAL_CODECS_SUPPORTED) {
+            Log.e(TAG, "Cannot enable optional codecs: not supported");
+            return;
+        }
+        BluetoothCodecStatus codecStatus = getCodecStatus(device);
+        if (codecStatus == null) {
+            Log.e(TAG, "Cannot enable optional codecs: codec status is null");
+            return;
+        }
+        mA2dpCodecConfig.enableOptionalCodecs(device, codecStatus.getCodecConfig());
     }
 
     /**
@@ -737,7 +778,16 @@ public class A2dpService extends ProfileService {
             Log.e(TAG, "Cannot disable optional codecs: no active A2DP device");
             return;
         }
-        mA2dpCodecConfig.disableOptionalCodecs(device);
+        if (getSupportsOptionalCodecs(device) != BluetoothA2dp.OPTIONAL_CODECS_SUPPORTED) {
+            Log.e(TAG, "Cannot disable optional codecs: not supported");
+            return;
+        }
+        BluetoothCodecStatus codecStatus = getCodecStatus(device);
+        if (codecStatus == null) {
+            Log.e(TAG, "Cannot disable optional codecs: codec status is null");
+            return;
+        }
+        mA2dpCodecConfig.disableOptionalCodecs(device, codecStatus.getCodecConfig());
     }
 
     public int getSupportsOptionalCodecs(BluetoothDevice device) {
@@ -809,7 +859,8 @@ public class A2dpService extends ProfileService {
      * @param sameAudioFeedingParameters if true the audio feeding parameters
      * haven't been changed
      */
-    void codecConfigUpdated(BluetoothDevice device, BluetoothCodecStatus codecStatus,
+    @VisibleForTesting
+    public void codecConfigUpdated(BluetoothDevice device, BluetoothCodecStatus codecStatus,
                             boolean sameAudioFeedingParameters) {
         // Log codec config and capability metrics
         BluetoothCodecConfig codecConfig = codecStatus.getCodecConfig();
@@ -874,12 +925,8 @@ public class A2dpService extends ProfileService {
         }
 
         synchronized (mStateMachines) {
-            if (AvrcpTargetService.get() != null) {
-                if (mActiveDevice != null) {
-                    AvrcpTargetService.get().storeVolumeForDevice(mActiveDevice);
-                }
-
-                AvrcpTargetService.get().volumeDeviceSwitched(device);
+            if (mFactory.getAvrcpTargetService() != null) {
+                mFactory.getAvrcpTargetService().volumeDeviceSwitched(device);
             }
 
             mActiveDevice = device;
@@ -965,9 +1012,17 @@ public class A2dpService extends ProfileService {
         }
     }
 
-    private void updateOptionalCodecsSupport(BluetoothDevice device) {
+
+    /**
+     * Update and initiate optional codec status change to native.
+     *
+     * @param device the device to change optional codec status
+     */
+    @VisibleForTesting
+    public void updateOptionalCodecsSupport(BluetoothDevice device) {
         int previousSupport = getSupportsOptionalCodecs(device);
         boolean supportsOptional = false;
+        boolean hasMandatoryCodec = false;
 
         synchronized (mStateMachines) {
             A2dpStateMachine sm = mStateMachines.get(device);
@@ -977,13 +1032,22 @@ public class A2dpService extends ProfileService {
             BluetoothCodecStatus codecStatus = sm.getCodecStatus();
             if (codecStatus != null) {
                 for (BluetoothCodecConfig config : codecStatus.getCodecsSelectableCapabilities()) {
-                    if (!config.isMandatoryCodec()) {
+                    if (config.isMandatoryCodec()) {
+                        hasMandatoryCodec = true;
+                    } else {
                         supportsOptional = true;
-                        break;
                     }
                 }
             }
         }
+        if (!hasMandatoryCodec) {
+            // Mandatory codec(SBC) is not selectable. It could be caused by the remote device
+            // select codec before native finish get codec capabilities. Stop use this codec
+            // status as the reference to support/enable optional codecs.
+            Log.i(TAG, "updateOptionalCodecsSupport: Mandatory codec is not selectable.");
+            return;
+        }
+
         if (previousSupport == BluetoothA2dp.OPTIONAL_CODECS_SUPPORT_UNKNOWN
                 || supportsOptional != (previousSupport
                                     == BluetoothA2dp.OPTIONAL_CODECS_SUPPORTED)) {
@@ -991,10 +1055,17 @@ public class A2dpService extends ProfileService {
         }
         if (supportsOptional) {
             int enabled = getOptionalCodecsEnabled(device);
-            if (enabled == BluetoothA2dp.OPTIONAL_CODECS_PREF_ENABLED) {
-                enableOptionalCodecs(device);
-            } else if (enabled == BluetoothA2dp.OPTIONAL_CODECS_PREF_DISABLED) {
-                disableOptionalCodecs(device);
+            switch (enabled) {
+                case BluetoothA2dp.OPTIONAL_CODECS_PREF_UNKNOWN:
+                    // Enable optional codec by default.
+                    setOptionalCodecsEnabled(device, BluetoothA2dp.OPTIONAL_CODECS_PREF_ENABLED);
+                    // Fall through intended
+                case BluetoothA2dp.OPTIONAL_CODECS_PREF_ENABLED:
+                    enableOptionalCodecs(device);
+                    break;
+                case BluetoothA2dp.OPTIONAL_CODECS_PREF_DISABLED:
+                    disableOptionalCodecs(device);
+                    break;
             }
         }
     }
@@ -1005,10 +1076,6 @@ public class A2dpService extends ProfileService {
         }
         synchronized (mStateMachines) {
             if (toState == BluetoothProfile.STATE_CONNECTED) {
-                // Each time a device connects, we want to re-check if it supports optional
-                // codecs (perhaps it's had a firmware update, etc.) and save that state if
-                // it differs from what we had saved before.
-                updateOptionalCodecsSupport(device);
                 MetricsLogger.logProfileConnectionEvent(BluetoothMetricsProto.ProfileId.A2DP);
             }
             // Set the active device if only one connected device is supported and it was connected
