@@ -184,7 +184,7 @@ final class MceStateMachine extends StateMachine {
 
     public synchronized int getState() {
         IState currentState = this.getCurrentState();
-        if (currentState.getClass() == Disconnected.class) {
+        if (currentState == null || currentState.getClass() == Disconnected.class) {
             return BluetoothProfile.STATE_DISCONNECTED;
         }
         if (currentState.getClass() == Connected.class) {
@@ -340,7 +340,6 @@ final class MceStateMachine extends StateMachine {
             }
             onConnectionStateChanged(mPreviousState, BluetoothProfile.STATE_CONNECTING);
 
-            BluetoothAdapter.getDefaultAdapter().cancelDiscovery();
             // When commanded to connect begin SDP to find the MAS server.
             mDevice.sdpSearch(BluetoothUuid.MAS);
             sendMessageDelayed(MSG_CONNECTING_TIMEOUT, TIMEOUT);
