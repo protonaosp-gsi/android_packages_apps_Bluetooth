@@ -18,6 +18,7 @@ package com.android.bluetooth.avrcpcontroller;
 
 import android.media.MediaMetadata;
 import android.media.browse.MediaBrowser.MediaItem;
+import android.media.session.MediaController;
 import android.media.session.MediaSession;
 import android.media.session.PlaybackState;
 import android.os.Bundle;
@@ -70,6 +71,11 @@ public class BluetoothMediaBrowserService extends MediaBrowserService {
                 | MediaSession.FLAG_HANDLES_TRANSPORT_CONTROLS);
         mSession.setQueueTitle(getString(R.string.bluetooth_a2dp_sink_queue_name));
         mSession.setQueue(mMediaQueue);
+        PlaybackState.Builder playbackStateBuilder = new PlaybackState.Builder();
+        playbackStateBuilder.setState(PlaybackState.STATE_ERROR,
+                PlaybackState.PLAYBACK_POSITION_UNKNOWN, 1.0f).setActions(0);
+        playbackStateBuilder.setErrorMessage(getString(R.string.bluetooth_disconnected));
+        mSession.setPlaybackState(playbackStateBuilder.build());
         sBluetoothMediaBrowserService = this;
     }
 
@@ -167,6 +173,18 @@ public class BluetoothMediaBrowserService extends MediaBrowserService {
             sBluetoothMediaBrowserService.mSession.getController().getTransportControls().pause();
         } else {
             Log.w(TAG, "pause Unavailable");
+        }
+    }
+
+    /**
+     * Get object for controlling playback
+     */
+    public static synchronized MediaController.TransportControls getTransportControls() {
+        if (sBluetoothMediaBrowserService != null) {
+            return sBluetoothMediaBrowserService.mSession.getController().getTransportControls();
+        } else {
+            Log.w(TAG, "transportControls Unavailable");
+            return null;
         }
     }
 
