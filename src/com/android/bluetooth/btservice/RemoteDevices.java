@@ -179,7 +179,6 @@ final class RemoteDevices {
         return prop.getDevice();
     }
 
-    @VisibleForTesting
     DeviceProperties addDeviceProperties(byte[] address) {
         synchronized (mDevices) {
             DeviceProperties prop = new DeviceProperties();
@@ -210,13 +209,13 @@ final class RemoteDevices {
         private byte[] mAddress;
         private int mBluetoothClass = BluetoothClass.Device.Major.UNCATEGORIZED;
         private short mRssi;
+        private ParcelUuid[] mUuids;
+        private int mDeviceType;
         private String mAlias;
+        private int mBondState;
         private BluetoothDevice mDevice;
         private boolean mIsBondingInitiatedLocally;
         private int mBatteryLevel = BluetoothDevice.BATTERY_LEVEL_UNKNOWN;
-        @VisibleForTesting int mBondState;
-        @VisibleForTesting int mDeviceType;
-        @VisibleForTesting ParcelUuid[] mUuids;
 
         DeviceProperties() {
             mBondState = BluetoothDevice.BOND_NONE;
@@ -275,6 +274,7 @@ final class RemoteDevices {
                 return mRssi;
             }
         }
+
         /**
          * @return mDeviceType
          */
@@ -320,6 +320,7 @@ final class RemoteDevices {
                     without waiting for the ACTION_UUID intent.
                     This was resulting in multiple calls to connect().*/
                     mUuids = null;
+                    mAlias = null;
                 }
             }
         }
@@ -547,7 +548,6 @@ final class RemoteDevices {
                             }
                             device.mUuids = newUuids;
                             if (sAdapterService.getState() == BluetoothAdapter.STATE_ON) {
-                                sAdapterService.deviceUuidUpdated(bdDevice);
                                 sendUuidIntent(bdDevice, device);
                             }
                             break;
