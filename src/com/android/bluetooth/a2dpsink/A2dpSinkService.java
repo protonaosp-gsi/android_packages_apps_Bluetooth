@@ -171,21 +171,21 @@ public class A2dpSinkService extends ProfileService {
         }
 
         @Override
-        public boolean setPriority(BluetoothDevice device, int priority) {
+        public boolean setConnectionPolicy(BluetoothDevice device, int connectionPolicy) {
             A2dpSinkService service = getService();
             if (service == null) {
                 return false;
             }
-            return service.setPriority(device, priority);
+            return service.setConnectionPolicy(device, connectionPolicy);
         }
 
         @Override
-        public int getPriority(BluetoothDevice device) {
+        public int getConnectionPolicy(BluetoothDevice device) {
             A2dpSinkService service = getService();
             if (service == null) {
-                return BluetoothProfile.PRIORITY_UNDEFINED;
+                return BluetoothProfile.CONNECTION_POLICY_UNKNOWN;
             }
-            return service.getPriority(device);
+            return service.getConnectionPolicy(device);
         }
 
         @Override
@@ -224,8 +224,9 @@ public class A2dpSinkService extends ProfileService {
             Log.d(TAG, " connect device: " + device
                     + ", InstanceMap start state: " + sb.toString());
         }
-        if (getPriority(device) == BluetoothProfile.PRIORITY_OFF) {
-            Log.w(TAG, "Connection not allowed: <" + device.getAddress() + "> is PRIORITY_OFF");
+        if (getConnectionPolicy(device) == BluetoothProfile.CONNECTION_POLICY_FORBIDDEN) {
+            Log.w(TAG, "Connection not allowed: <" + device.getAddress()
+                    + "> is CONNECTION_POLICY_FORBIDDEN");
             return false;
         }
         A2dpSinkStateMachine stateMachine = getOrCreateStateMachine(device);
@@ -312,32 +313,47 @@ public class A2dpSinkService extends ProfileService {
     }
 
     /**
-     * Set the priority of the  profile.
+     * Set connection policy of the profile and connects it if connectionPolicy is
+     * {@link BluetoothProfile#CONNECTION_POLICY_ALLOWED} or disconnects if connectionPolicy is
+     * {@link BluetoothProfile#CONNECTION_POLICY_FORBIDDEN}
      *
-     * @param device   the remote device
-     * @param priority the priority of the profile
-     * @return true on success, otherwise false
+     * <p> The device should already be paired.
+     * Connection policy can be one of:
+     * {@link BluetoothProfile#CONNECTION_POLICY_ALLOWED},
+     * {@link BluetoothProfile#CONNECTION_POLICY_FORBIDDEN},
+     * {@link BluetoothProfile#CONNECTION_POLICY_UNKNOWN}
+     *
+     * @param device Paired bluetooth device
+     * @param connectionPolicy is the connection policy to set to for this profile
+     * @return true if connectionPolicy is set, false on error
      */
-    public boolean setPriority(BluetoothDevice device, int priority) {
-        enforceCallingOrSelfPermission(BLUETOOTH_ADMIN_PERM, "Need BLUETOOTH_ADMIN permission");
+    public boolean setConnectionPolicy(BluetoothDevice device, int connectionPolicy) {
+        enforceCallingOrSelfPermission(
+                BLUETOOTH_PRIVILEGED, "Need BLUETOOTH_PRIVILEGED permission");
         if (DBG) {
-            Log.d(TAG, "Saved priority " + device + " = " + priority);
+            Log.d(TAG, "Saved connectionPolicy " + device + " = " + connectionPolicy);
         }
         AdapterService.getAdapterService().getDatabase()
-                .setProfilePriority(device, BluetoothProfile.A2DP_SINK, priority);
+                .setProfileConnectionPolicy(device, BluetoothProfile.A2DP_SINK, connectionPolicy);
+        if (connectionPolicy == BluetoothProfile.CONNECTION_POLICY_ALLOWED) {
+            connect(device);
+        } else if (connectionPolicy == BluetoothProfile.CONNECTION_POLICY_FORBIDDEN) {
+            disconnect(device);
+        }
         return true;
     }
 
     /**
-     * Get the priority of the profile.
+     * Get the connection policy of the profile.
      *
      * @param device the remote device
-     * @return priority of the specified device
+     * @return connection policy of the specified device
      */
-    public int getPriority(BluetoothDevice device) {
-        enforceCallingOrSelfPermission(BLUETOOTH_ADMIN_PERM, "Need BLUETOOTH_ADMIN permission");
+    public int getConnectionPolicy(BluetoothDevice device) {
+        enforceCallingOrSelfPermission(
+                BLUETOOTH_PRIVILEGED, "Need BLUETOOTH_PRIVILEGED permission");
         return AdapterService.getAdapterService().getDatabase()
-                .getProfilePriority(device, BluetoothProfile.A2DP_SINK);
+                .getProfileConnectionPolicy(device, BluetoothProfile.A2DP_SINK);
     }
 
 
@@ -362,7 +378,8 @@ public class A2dpSinkService extends ProfileService {
     }
 
     boolean isA2dpPlaying(BluetoothDevice device) {
-        enforceCallingOrSelfPermission(BLUETOOTH_PERM, "Need BLUETOOTH permission");
+        enforceCallingOrSelfPermission(
+                BLUETOOTH_PRIVILEGED, "Need BLUETOOTH_PRIVILEGED permission");
         return mA2dpSinkStreamHandler.isPlaying();
     }
 

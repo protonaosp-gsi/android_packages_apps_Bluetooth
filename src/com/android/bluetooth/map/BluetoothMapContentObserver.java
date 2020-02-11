@@ -47,12 +47,14 @@ import android.provider.Telephony.Sms.Inbox;
 import android.telephony.PhoneStateListener;
 import android.telephony.ServiceState;
 import android.telephony.SmsManager;
+import android.telephony.SubscriptionManager;
 import android.telephony.TelephonyManager;
 import android.text.TextUtils;
 import android.text.format.DateUtils;
 import android.util.Log;
 import android.util.Xml;
 
+import com.android.bluetooth.Utils;
 import com.android.bluetooth.map.BluetoothMapUtils.TYPE;
 import com.android.bluetooth.map.BluetoothMapbMessageMime.MimePart;
 import com.android.bluetooth.mapapi.BluetoothMapContract;
@@ -113,7 +115,7 @@ public class BluetoothMapContentObserver {
     private static final long EVENT_FILTER_CONVERSATION_CHANGED = 1L << 10;
     private static final long EVENT_FILTER_PARTICIPANT_PRESENCE_CHANGED = 1L << 11;
     private static final long EVENT_FILTER_PARTICIPANT_CHATSTATE_CHANGED = 1L << 12;
-    private static final long EVENT_FILTER_MESSAGE_REMOVED = 1L << 13;
+    private static final long EVENT_FILTER_MESSAGE_REMOVED = 1L << 14;
 
     // TODO: If we are requesting a large message from the network, on a slow connection
     //       20 seconds might not be enough... But then again 20 seconds is long for other
@@ -313,7 +315,7 @@ public class BluetoothMapContentObserver {
 
     public void setObserverRemoteFeatureMask(int remoteSupportedFeatures) {
         mMapSupportedFeatures =
-                remoteSupportedFeatures & BluetoothMapMasInstance.SDP_MAP_MAS_FEATURES;
+                remoteSupportedFeatures & BluetoothMapMasInstance.getFeatureMask();
         if ((BluetoothMapUtils.MAP_FEATURE_EXTENDED_EVENT_REPORT_11_BIT & mMapSupportedFeatures)
                 != 0) {
             mMapEventReportVersion = BluetoothMapUtils.MAP_EVENT_REPORT_V11;
@@ -1452,10 +1454,7 @@ public class BluetoothMapContentObserver {
                                                     Context.TELEPHONY_SERVICE);
                                     if (tm != null) {
                                         phone = tm.getLine1Number();
-                                        name = tm.getLine1AlphaTag();
-                                        if (name == null || name.isEmpty()) {
-                                            name = phone;
-                                        }
+                                        name = phone;
                                     }
                                 }
                                 String priority = "no"; // no priority for sms
@@ -1527,15 +1526,21 @@ public class BluetoothMapContentObserver {
                         }
                     } while (c.moveToNext());
                 }
+            } catch (IllegalStateException e) {
+                Log.w(TAG, e);
             } finally {
                 if (c != null) {
                     c.close();
                 }
             }
-
+            String eventType = EVENT_TYPE_DELETE;
             for (Msg msg : getMsgListSms().values()) {
                 // "old_folder" used only for MessageShift event
-                Event evt = new Event(EVENT_TYPE_DELETE, msg.id, getSmsFolderName(msg.type), null,
+                if (mMapEventReportVersion >= BluetoothMapUtils.MAP_EVENT_REPORT_V12) {
+                    eventType = EVENT_TYPE_REMOVED;
+                    if (V) Log.v(TAG," sent EVENT_TYPE_REMOVED");
+                }
+                Event evt = new Event(eventType, msg.id, getSmsFolderName(msg.type), null,
                         mSmsType);
                 sendEvent(evt);
                 listChanged = true;
@@ -1692,6 +1697,8 @@ public class BluetoothMapContentObserver {
                     } while (c.moveToNext());
 
                 }
+            } catch (IllegalStateException e) {
+                Log.w(TAG, e);
             } finally {
                 if (c != null) {
                     c.close();
@@ -2544,6 +2551,37 @@ public class BluetoothMapContentObserver {
     private Map<Long, PushMsgInfo> mPushMsgList =
             Collections.synchronizedMap(new HashMap<Long, PushMsgInfo>());
 
+    /**
+     * Add an SMS to the given URI.
+     *
+     * @param resolver the content resolver to use
+     * @param uri the URI to add the message to
+     * @param address the address of the sender
+     * @param body the body of the message
+     * @param subject the pseudo-subject of the message
+     * @param date the timestamp for the message
+     * @return the URI for the new message
+     */
+    private static Uri addMessageToUri(ContentResolver resolver, Uri uri,
+                                      String address, String body, String subject,
+                                      Long date) {
+        ContentValues values = new ContentValues(7);
+        final int statusPending = 32;
+        final int subId = SubscriptionManager.getDefaultSmsSubscriptionId();
+        Log.v(TAG, "Telephony addMessageToUri sub id: " + subId);
+
+        values.put(Telephony.Sms.SUBSCRIPTION_ID, subId);
+        values.put(Telephony.Sms.ADDRESS, address);
+        if (date != null) {
+            values.put(Telephony.Sms.DATE, date);
+        }
+        values.put(Telephony.Sms.READ, 0);
+        values.put(Telephony.Sms.SUBJECT, subject);
+        values.put(Telephony.Sms.BODY, body);
+        values.put(Telephony.Sms.STATUS, statusPending);
+        return resolver.insert(uri, values);
+    }
+
     public long pushMessage(BluetoothMapbMessage msg, BluetoothMapFolderElement folderElement,
             BluetoothMapAppParams ap, String emailBaseUri)
             throws IllegalArgumentException, RemoteException, IOException {
@@ -2649,8 +2687,6 @@ public class BluetoothMapContentObserver {
                     String phone = recipient.getFirstPhoneNumber();
                     String email = recipient.getFirstEmail();
                     String folder = folderElement.getName();
-                    boolean read = false;
-                    boolean deliveryReport = true;
                     String msgBody = null;
 
                     /* If MMS contains text only and the size is less than ten SMS's
@@ -2699,8 +2735,8 @@ public class BluetoothMapContentObserver {
                         Uri contentUri = Uri.parse(Sms.CONTENT_URI + "/" + folder);
                         Uri uri;
                         synchronized (getMsgListSms()) {
-                            uri = Sms.addMessageToUri(mResolver, contentUri, phone, msgBody, "",
-                                    System.currentTimeMillis(), read, deliveryReport);
+                            uri = addMessageToUri(mResolver, contentUri, phone, msgBody, "",
+                                    System.currentTimeMillis());
 
                             if (V) {
                                 Log.v(TAG, "Sms.addMessageToUri() returned: " + uri);
@@ -3272,7 +3308,7 @@ public class BluetoothMapContentObserver {
                     Log.d(TAG, "actionMessageSent: result OK");
                 }
                 if (msgInfo.transparent == 0) {
-                    if (!Sms.moveMessageToFolder(context, msgInfo.uri, Sms.MESSAGE_TYPE_SENT, 0)) {
+                    if (!Utils.moveMessageToFolder(context, msgInfo.uri, true)) {
                         Log.w(TAG, "Failed to move " + msgInfo.uri + " to SENT");
                     }
                 } else {
@@ -3294,8 +3330,7 @@ public class BluetoothMapContentObserver {
                     sendEvent(evt);
                 } else {
                     if (msgInfo.transparent == 0) {
-                        if (!Sms.moveMessageToFolder(context, msgInfo.uri, Sms.MESSAGE_TYPE_FAILED,
-                                0)) {
+                        if (!Utils.moveMessageToFolder(context, msgInfo.uri, false)) {
                             Log.w(TAG, "Failed to move " + msgInfo.uri + " to FAILED");
                         }
                     } else {
@@ -3509,7 +3544,7 @@ public class BluetoothMapContentObserver {
         if (result == Activity.RESULT_OK) {
             Log.d(TAG, "actionMessageSentDisconnected: result OK");
             if (transparent == 0) {
-                if (!Sms.moveMessageToFolder(context, uri, Sms.MESSAGE_TYPE_SENT, 0)) {
+                if (!Utils.moveMessageToFolder(context, uri, true)) {
                     Log.d(TAG, "Failed to move " + uri + " to SENT");
                 }
             } else {
@@ -3522,7 +3557,7 @@ public class BluetoothMapContentObserver {
             } else */
             {
                 if (transparent == 0) {
-                    if (!Sms.moveMessageToFolder(context, uri, Sms.MESSAGE_TYPE_FAILED, 0)) {
+                    if (!Utils.moveMessageToFolder(context, uri, false)) {
                         Log.d(TAG, "Failed to move " + uri + " to FAILED");
                     }
                 } else {
@@ -3597,7 +3632,7 @@ public class BluetoothMapContentObserver {
                     if (msgInfo == null || !msgInfo.resend) {
                         continue;
                     }
-                    Sms.moveMessageToFolder(mContext, msgInfo.uri, Sms.MESSAGE_TYPE_FAILED, 0);
+                    Utils.moveMessageToFolder(mContext, msgInfo.uri, false);
                 } while (c.moveToNext());
             }
         } finally {

@@ -54,9 +54,9 @@ import android.os.Message;
 import android.util.Log;
 
 import com.android.bluetooth.btservice.ProfileService;
+import com.android.bluetooth.statemachine.State;
+import com.android.bluetooth.statemachine.StateMachine;
 import com.android.internal.annotations.VisibleForTesting;
-import com.android.internal.util.State;
-import com.android.internal.util.StateMachine;
 
 import java.io.FileDescriptor;
 import java.io.PrintWriter;
@@ -178,7 +178,7 @@ final class HearingAidStateMachine extends StateMachine {
                         Log.d(TAG, "Disconnected: stack event: " + event);
                     }
                     if (!mDevice.equals(event.device)) {
-                        Log.wtfStack(TAG, "Device(" + mDevice + "): event mismatch: " + event);
+                        Log.wtf(TAG, "Device(" + mDevice + "): event mismatch: " + event);
                     }
                     switch (event.type) {
                         case HearingAidStackEvent.EVENT_TYPE_CONNECTION_STATE_CHANGED:
@@ -282,7 +282,7 @@ final class HearingAidStateMachine extends StateMachine {
                     HearingAidStackEvent event = (HearingAidStackEvent) message.obj;
                     log("Connecting: stack event: " + event);
                     if (!mDevice.equals(event.device)) {
-                        Log.wtfStack(TAG, "Device(" + mDevice + "): event mismatch: " + event);
+                        Log.wtf(TAG, "Device(" + mDevice + "): event mismatch: " + event);
                     }
                     switch (event.type) {
                         case HearingAidStackEvent.EVENT_TYPE_CONNECTION_STATE_CHANGED:
@@ -367,7 +367,7 @@ final class HearingAidStateMachine extends StateMachine {
                     HearingAidStackEvent event = (HearingAidStackEvent) message.obj;
                     log("Disconnecting: stack event: " + event);
                     if (!mDevice.equals(event.device)) {
-                        Log.wtfStack(TAG, "Device(" + mDevice + "): event mismatch: " + event);
+                        Log.wtf(TAG, "Device(" + mDevice + "): event mismatch: " + event);
                     }
                     switch (event.type) {
                         case HearingAidStackEvent.EVENT_TYPE_CONNECTION_STATE_CHANGED:
@@ -460,7 +460,7 @@ final class HearingAidStateMachine extends StateMachine {
                     HearingAidStackEvent event = (HearingAidStackEvent) message.obj;
                     log("Connected: stack event: " + event);
                     if (!mDevice.equals(event.device)) {
-                        Log.wtfStack(TAG, "Device(" + mDevice + "): event mismatch: " + event);
+                        Log.wtf(TAG, "Device(" + mDevice + "): event mismatch: " + event);
                     }
                     switch (event.type) {
                         case HearingAidStackEvent.EVENT_TYPE_CONNECTION_STATE_CHANGED:
