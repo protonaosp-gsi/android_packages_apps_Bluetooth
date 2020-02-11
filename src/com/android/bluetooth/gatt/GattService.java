@@ -18,6 +18,7 @@ package com.android.bluetooth.gatt;
 
 import static android.content.pm.PackageManager.PERMISSION_GRANTED;
 
+import android.annotation.Nullable;
 import android.app.AppOpsManager;
 import android.app.PendingIntent;
 import android.app.Service;
@@ -340,25 +341,25 @@ public class GattService extends ProfileService {
                 Log.d(TAG, "Binder is dead - unregistering scanner (" + mScannerId + ")!");
             }
 
-            if (isScanClient(mScannerId)) {
-                ScanClient client = new ScanClient(mScannerId);
+            ScanClient client = getScanClient(mScannerId);
+            if (client != null) {
                 client.appDied = true;
-                stopScan(client);
+                stopScan(client.scannerId);
             }
         }
 
-        private boolean isScanClient(int clientIf) {
+        private ScanClient getScanClient(int clientIf) {
             for (ScanClient client : mScanManager.getRegularScanQueue()) {
                 if (client.scannerId == clientIf) {
-                    return true;
+                    return client;
                 }
             }
             for (ScanClient client : mScanManager.getBatchScanQueue()) {
                 if (client.scannerId == clientIf) {
-                    return true;
+                    return client;
                 }
             }
-            return false;
+            return null;
         }
     }
 
@@ -466,22 +467,25 @@ public class GattService extends ProfileService {
 
         @Override
         public void startScan(int scannerId, ScanSettings settings, List<ScanFilter> filters,
-                List storages, String callingPackage) {
+                List storages, String callingPackage, String callingFeatureId) {
             GattService service = getService();
             if (service == null) {
                 return;
             }
-            service.startScan(scannerId, settings, filters, storages, callingPackage);
+            service.startScan(scannerId, settings, filters, storages, callingPackage,
+                    callingFeatureId);
         }
 
         @Override
         public void startScanForIntent(PendingIntent intent, ScanSettings settings,
-                List<ScanFilter> filters, String callingPackage) throws RemoteException {
+                List<ScanFilter> filters, String callingPackage, String callingFeatureId)
+                throws RemoteException {
             GattService service = getService();
             if (service == null) {
                 return;
             }
-            service.registerPiAndStartScan(intent, settings, filters, callingPackage);
+            service.registerPiAndStartScan(intent, settings, filters, callingPackage,
+                    callingFeatureId);
         }
 
         @Override
@@ -500,7 +504,7 @@ public class GattService extends ProfileService {
             if (service == null) {
                 return;
             }
-            service.stopScan(new ScanClient(scannerId));
+            service.stopScan(scannerId);
         }
 
         @Override
@@ -1031,7 +1035,7 @@ public class GattService extends ProfileService {
             } catch (RemoteException | PendingIntent.CanceledException e) {
                 Log.e(TAG, "Exception: " + e);
                 mScannerMap.remove(client.scannerId);
-                mScanManager.stopScan(client);
+                mScanManager.stopScan(client.scannerId);
             }
         }
     }
@@ -1043,7 +1047,7 @@ public class GattService extends ProfileService {
         try {
             sendResultsByPendingIntent(pii, results, callbackType);
         } catch (PendingIntent.CanceledException e) {
-            stopScan(client);
+            stopScan(client.scannerId);
             unregisterScanner(client.scannerId);
         }
     }
@@ -1595,7 +1599,7 @@ public class GattService extends ProfileService {
         } catch (RemoteException | PendingIntent.CanceledException e) {
             Log.e(TAG, "Exception: " + e);
             mScannerMap.remove(client.scannerId);
-            mScanManager.stopScan(client);
+            mScanManager.stopScan(client.scannerId);
         }
     }
 
@@ -1933,7 +1937,8 @@ public class GattService extends ProfileService {
     }
 
     void startScan(int scannerId, ScanSettings settings, List<ScanFilter> filters,
-            List<List<ResultStorageDescriptor>> storages, String callingPackage) {
+            List<List<ResultStorageDescriptor>> storages, String callingPackage,
+            @Nullable String callingFeatureId) {
         if (DBG) {
             Log.d(TAG, "start scan with filters");
         }
@@ -1947,13 +1952,11 @@ public class GattService extends ProfileService {
         mAppOps.checkPackage(Binder.getCallingUid(), callingPackage);
         scanClient.isQApp = Utils.isQApp(this, callingPackage);
         if (scanClient.isQApp) {
-            scanClient.hasLocationPermission =
-                    Utils.checkCallerHasFineLocation(
-                            this, mAppOps, callingPackage, scanClient.userHandle);
+            scanClient.hasLocationPermission = Utils.checkCallerHasFineLocation(this, mAppOps,
+                    callingPackage, callingFeatureId, scanClient.userHandle);
         } else {
-            scanClient.hasLocationPermission =
-                    Utils.checkCallerHasCoarseOrFineLocation(
-                            this, mAppOps, callingPackage, scanClient.userHandle);
+            scanClient.hasLocationPermission = Utils.checkCallerHasCoarseOrFineLocation(this,
+                    mAppOps, callingPackage, callingFeatureId, scanClient.userHandle);
         }
         scanClient.hasNetworkSettingsPermission =
                 Utils.checkCallerHasNetworkSettingsPermission(this);
@@ -1961,17 +1964,22 @@ public class GattService extends ProfileService {
                 Utils.checkCallerHasNetworkSetupWizardPermission(this);
 
         AppScanStats app = mScannerMap.getAppScanStatsById(scannerId);
+        ScannerMap.App cbApp = mScannerMap.getById(scannerId);
         if (app != null) {
             scanClient.stats = app;
             boolean isFilteredScan = (filters != null) && !filters.isEmpty();
-            app.recordScanStart(settings, isFilteredScan, scannerId);
+            boolean isCallbackScan = false;
+            if (cbApp != null) {
+                isCallbackScan = cbApp.callback != null;
+            }
+            app.recordScanStart(settings, filters, isFilteredScan, isCallbackScan, scannerId);
         }
 
         mScanManager.startScan(scanClient);
     }
 
     void registerPiAndStartScan(PendingIntent pendingIntent, ScanSettings settings,
-            List<ScanFilter> filters, String callingPackage) {
+            List<ScanFilter> filters, String callingPackage, @Nullable String callingFeatureId) {
         if (DBG) {
             Log.d(TAG, "start scan with filters, for PendingIntent");
         }
@@ -1989,6 +1997,13 @@ public class GattService extends ProfileService {
         piInfo.settings = settings;
         piInfo.filters = filters;
         piInfo.callingPackage = callingPackage;
+
+        // Don't start scan if the Pi scan already in mScannerMap.
+        if (mScannerMap.getByContextInfo(piInfo) != null) {
+            Log.d(TAG, "Don't startScan(PI) since the same Pi scan already in mScannerMap.");
+            return;
+        }
+
         ScannerMap.App app = mScannerMap.add(uuid, null, null, piInfo, this);
         app.mUserHandle = UserHandle.of(UserHandle.getCallingUserId());
         mAppOps.checkPackage(Binder.getCallingUid(), callingPackage);
@@ -1996,10 +2011,10 @@ public class GattService extends ProfileService {
         try {
             if (app.mIsQApp) {
                 app.hasLocationPermission = Utils.checkCallerHasFineLocation(
-                      this, mAppOps, callingPackage, app.mUserHandle);
+                      this, mAppOps, callingPackage, callingFeatureId, app.mUserHandle);
             } else {
                 app.hasLocationPermission = Utils.checkCallerHasCoarseOrFineLocation(
-                      this, mAppOps, callingPackage, app.mUserHandle);
+                      this, mAppOps, callingPackage, callingFeatureId, app.mUserHandle);
             }
         } catch (SecurityException se) {
             // No need to throw here. Just mark as not granted.
@@ -2026,7 +2041,8 @@ public class GattService extends ProfileService {
         if (scanStats != null) {
             scanClient.stats = scanStats;
             boolean isFilteredScan = (piInfo.filters != null) && !piInfo.filters.isEmpty();
-            scanStats.recordScanStart(piInfo.settings, isFilteredScan, scannerId);
+            scanStats.recordScanStart(
+                    piInfo.settings, piInfo.filters, isFilteredScan, false, scannerId);
         }
 
         mScanManager.startScan(scanClient);
@@ -2039,7 +2055,7 @@ public class GattService extends ProfileService {
         mScanManager.flushBatchScanResults(new ScanClient(scannerId));
     }
 
-    void stopScan(ScanClient client) {
+    void stopScan(int scannerId) {
         enforceAdminPermission();
         int scanQueueSize =
                 mScanManager.getBatchScanQueue().size() + mScanManager.getRegularScanQueue().size();
@@ -2048,12 +2064,12 @@ public class GattService extends ProfileService {
         }
 
         AppScanStats app = null;
-        app = mScannerMap.getAppScanStatsById(client.scannerId);
+        app = mScannerMap.getAppScanStatsById(scannerId);
         if (app != null) {
-            app.recordScanStop(client.scannerId);
+            app.recordScanStop(scannerId);
         }
 
-        mScanManager.stopScan(client);
+        mScanManager.stopScan(scannerId);
     }
 
     void stopScan(PendingIntent intent, String callingPackage) {
@@ -2066,7 +2082,7 @@ public class GattService extends ProfileService {
         }
         if (app != null) {
             final int scannerId = app.id;
-            stopScan(new ScanClient(scannerId));
+            stopScan(scannerId);
             // Also unregister the scanner
             unregisterScanner(scannerId);
         }
@@ -3162,6 +3178,22 @@ public class GattService extends ProfileService {
         return uuids;
     }
 
+    void dumpRegisterId(StringBuilder sb) {
+        sb.append("  Scanner:\n");
+        for (Integer appId : mScannerMap.getAllAppsIds()) {
+            println(sb, "    app_if: " + appId + ", appName: " + mScannerMap.getById(appId).name);
+        }
+        sb.append("  Client:\n");
+        for (Integer appId : mClientMap.getAllAppsIds()) {
+            println(sb, "    app_if: " + appId + ", appName: " + mClientMap.getById(appId).name);
+        }
+        sb.append("  Server:\n");
+        for (Integer appId : mServerMap.getAllAppsIds()) {
+            println(sb, "    app_if: " + appId + ", appName: " + mServerMap.getById(appId).name);
+        }
+        sb.append("\n\n");
+    }
+
     @Override
     public void dump(StringBuilder sb) {
         super.dump(sb);
@@ -3172,7 +3204,10 @@ public class GattService extends ProfileService {
 
         println(sb, "mMaxScanFilters: " + mMaxScanFilters);
 
-        sb.append("\nGATT Scanner Map\n");
+        sb.append("\nRegistered App\n");
+        dumpRegisterId(sb);
+
+        sb.append("GATT Scanner Map\n");
         mScannerMap.dump(sb);
 
         sb.append("GATT Client Map\n");

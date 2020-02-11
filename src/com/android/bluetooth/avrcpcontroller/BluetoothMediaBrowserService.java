@@ -16,6 +16,8 @@
 
 package com.android.bluetooth.avrcpcontroller;
 
+import android.app.PendingIntent;
+import android.content.Intent;
 import android.media.MediaMetadata;
 import android.media.browse.MediaBrowser.MediaItem;
 import android.os.Bundle;
@@ -29,6 +31,7 @@ import android.util.Log;
 
 import androidx.media.MediaBrowserServiceCompat;
 
+import com.android.bluetooth.BluetoothPrefs;
 import com.android.bluetooth.R;
 
 import java.util.ArrayList;
@@ -60,6 +63,22 @@ public class BluetoothMediaBrowserService extends MediaBrowserServiceCompat {
     // Browsing related structures.
     private List<MediaSessionCompat.QueueItem> mMediaQueue = new ArrayList<>();
 
+    // Media Framework Content Style constants
+    private static final String CONTENT_STYLE_SUPPORTED =
+            "android.media.browse.CONTENT_STYLE_SUPPORTED";
+    public static final String CONTENT_STYLE_PLAYABLE_HINT =
+            "android.media.browse.CONTENT_STYLE_PLAYABLE_HINT";
+    public static final String CONTENT_STYLE_BROWSABLE_HINT =
+            "android.media.browse.CONTENT_STYLE_BROWSABLE_HINT";
+    public static final int CONTENT_STYLE_LIST_ITEM_HINT_VALUE = 1;
+    public static final int CONTENT_STYLE_GRID_ITEM_HINT_VALUE = 2;
+
+    // Error messaging extras
+    public static final String ERROR_RESOLUTION_ACTION_INTENT =
+            "android.media.extras.ERROR_RESOLUTION_ACTION_INTENT";
+    public static final String ERROR_RESOLUTION_ACTION_LABEL =
+            "android.media.extras.ERROR_RESOLUTION_ACTION_LABEL";
+
     /**
      * Initialize this BluetoothMediaBrowserService, creating our MediaSessionCompat, MediaPlayer
      * and MediaMetaData, and setting up mechanisms to talk with the AvrcpControllerService.
@@ -76,11 +95,7 @@ public class BluetoothMediaBrowserService extends MediaBrowserServiceCompat {
                 | MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS);
         mSession.setQueueTitle(getString(R.string.bluetooth_a2dp_sink_queue_name));
         mSession.setQueue(mMediaQueue);
-        PlaybackStateCompat.Builder playbackStateBuilder = new PlaybackStateCompat.Builder();
-        playbackStateBuilder.setState(PlaybackStateCompat.STATE_ERROR,
-                PlaybackStateCompat.PLAYBACK_POSITION_UNKNOWN, 1.0f).setActions(0);
-        playbackStateBuilder.setErrorMessage(getString(R.string.bluetooth_disconnected));
-        mSession.setPlaybackState(playbackStateBuilder.build());
+        setErrorPlaybackState();
         sBluetoothMediaBrowserService = this;
     }
 
@@ -92,6 +107,32 @@ public class BluetoothMediaBrowserService extends MediaBrowserServiceCompat {
         } else {
             return avrcpControllerService.getContents(parentMediaId);
         }
+    }
+
+    private void setErrorPlaybackState() {
+        Bundle extras = new Bundle();
+        extras.putString(ERROR_RESOLUTION_ACTION_LABEL,
+                getString(R.string.bluetooth_connect_action));
+        Intent launchIntent = new Intent();
+        launchIntent.setAction(BluetoothPrefs.BLUETOOTH_SETTING_ACTION);
+        launchIntent.addCategory(BluetoothPrefs.BLUETOOTH_SETTING_CATEGORY);
+        PendingIntent pendingIntent = PendingIntent.getActivity(getApplicationContext(), 0,
+                launchIntent, PendingIntent.FLAG_UPDATE_CURRENT);
+        extras.putParcelable(ERROR_RESOLUTION_ACTION_INTENT, pendingIntent);
+        PlaybackStateCompat errorState = new PlaybackStateCompat.Builder()
+                .setErrorMessage(getString(R.string.bluetooth_disconnected))
+                .setExtras(extras)
+                .setState(PlaybackStateCompat.STATE_ERROR, 0, 0)
+                .build();
+        mSession.setPlaybackState(errorState);
+    }
+
+    private Bundle getDefaultStyle() {
+        Bundle style = new Bundle();
+        style.putBoolean(CONTENT_STYLE_SUPPORTED, true);
+        style.putInt(CONTENT_STYLE_BROWSABLE_HINT, CONTENT_STYLE_GRID_ITEM_HINT_VALUE);
+        style.putInt(CONTENT_STYLE_PLAYABLE_HINT, CONTENT_STYLE_LIST_ITEM_HINT_VALUE);
+        return style;
     }
 
     @Override
@@ -110,7 +151,8 @@ public class BluetoothMediaBrowserService extends MediaBrowserServiceCompat {
     @Override
     public BrowserRoot onGetRoot(String clientPackageName, int clientUid, Bundle rootHints) {
         if (DBG) Log.d(TAG, "onGetRoot");
-        return new BrowserRoot(BrowseTree.ROOT, null);
+        Bundle style = getDefaultStyle();
+        return new BrowserRoot(BrowseTree.ROOT, style);
     }
 
     private void updateNowPlayingQueue(BrowseTree.BrowseNode node) {
@@ -138,6 +180,9 @@ public class BluetoothMediaBrowserService extends MediaBrowserServiceCompat {
 
     static synchronized void addressedPlayerChanged(MediaSessionCompat.Callback callback) {
         if (sBluetoothMediaBrowserService != null) {
+            if (callback == null) {
+                sBluetoothMediaBrowserService.setErrorPlaybackState();
+            }
             sBluetoothMediaBrowserService.mSession.setCallback(callback);
         } else {
             Log.w(TAG, "addressedPlayerChanged Unavailable");

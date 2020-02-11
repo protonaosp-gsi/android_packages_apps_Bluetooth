@@ -51,18 +51,19 @@ import android.os.ParcelUuid;
 import android.os.SystemClock;
 import android.util.Log;
 import android.util.Pair;
-import android.util.StatsLog;
 
 import com.android.bluetooth.BluetoothMetricsProto;
+import com.android.bluetooth.BluetoothStatsLog;
 import com.android.bluetooth.R;
 import com.android.bluetooth.Utils;
 import com.android.bluetooth.btservice.AdapterService;
 import com.android.bluetooth.btservice.MetricsLogger;
 import com.android.bluetooth.btservice.ProfileService;
+import com.android.bluetooth.statemachine.IState;
+import com.android.bluetooth.statemachine.State;
+import com.android.bluetooth.statemachine.StateMachine;
 import com.android.internal.annotations.VisibleForTesting;
-import com.android.internal.util.IState;
-import com.android.internal.util.State;
-import com.android.internal.util.StateMachine;
+import com.android.internal.util.ArrayUtils;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -876,8 +877,9 @@ public class HeadsetClientStateMachine extends StateMachine {
                         mCurrentDevice = device;
                         transitionTo(mConnecting);
                     } else {
-                        Log.i(TAG, "Incoming AG rejected. priority=" + mService.getPriority(device)
-                                + " bondState=" + device.getBondState());
+                        Log.i(TAG, "Incoming AG rejected. connectionPolicy="
+                                + mService.getConnectionPolicy(device) + " bondState="
+                                + device.getBondState());
                         // reject the connection and stay in Disconnected state
                         // itself
                         mNativeInterface.disconnect(getByteAddress(device));
@@ -1664,7 +1666,7 @@ public class HeadsetClientStateMachine extends StateMachine {
     }
 
     private void broadcastAudioState(BluetoothDevice device, int newState, int prevState) {
-        StatsLog.write(StatsLog.BLUETOOTH_SCO_CONNECTION_STATE_CHANGED,
+        BluetoothStatsLog.write(BluetoothStatsLog.BLUETOOTH_SCO_CONNECTION_STATE_CHANGED,
                 AdapterService.getAdapterService().obfuscateAddress(device),
                 getConnectionStateFromAudioState(newState), mAudioWbs
                         ? BluetoothHfpProtoEnums.SCO_CODEC_MSBC
@@ -1752,7 +1754,7 @@ public class HeadsetClientStateMachine extends StateMachine {
         synchronized (this) {
             for (BluetoothDevice device : bondedDevices) {
                 ParcelUuid[] featureUuids = device.getUuids();
-                if (!BluetoothUuid.isUuidPresent(featureUuids, BluetoothUuid.Handsfree_AG)) {
+                if (!ArrayUtils.contains(featureUuids, BluetoothUuid.HFP_AG)) {
                     continue;
                 }
                 connectionState = getConnectionState(device);
@@ -1767,16 +1769,16 @@ public class HeadsetClientStateMachine extends StateMachine {
     }
 
     boolean okToConnect(BluetoothDevice device) {
-        int priority = mService.getPriority(device);
+        int connectionPolicy = mService.getConnectionPolicy(device);
         boolean ret = false;
-        // check priority and accept or reject the connection. if priority is
+        // check connection policy and accept or reject the connection. if connection policy is
         // undefined
         // it is likely that our SDP has not completed and peer is initiating
         // the
         // connection. Allow this connection, provided the device is bonded
-        if ((BluetoothProfile.PRIORITY_OFF < priority) || (
-                (BluetoothProfile.PRIORITY_UNDEFINED == priority) && (device.getBondState()
-                        != BluetoothDevice.BOND_NONE))) {
+        if ((BluetoothProfile.CONNECTION_POLICY_FORBIDDEN < connectionPolicy) || (
+                (BluetoothProfile.CONNECTION_POLICY_UNKNOWN == connectionPolicy)
+                        && (device.getBondState() != BluetoothDevice.BOND_NONE))) {
             ret = true;
         }
         return ret;

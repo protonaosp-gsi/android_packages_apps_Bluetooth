@@ -24,6 +24,7 @@ import android.bluetooth.BluetoothProfile;
 import android.content.Context;
 
 import androidx.test.InstrumentationRegistry;
+import androidx.test.filters.FlakyTest;
 import androidx.test.filters.MediumTest;
 import androidx.test.rule.ServiceTestRule;
 import androidx.test.runner.AndroidJUnit4;
@@ -105,7 +106,7 @@ public class MapClientTest {
      * @param priority - The priority value you want the device to have
      */
     private void mockDevicePriority(BluetoothDevice device, int priority) {
-        when(mDatabaseManager.getProfilePriority(device, BluetoothProfile.MAP_CLIENT))
+        when(mDatabaseManager.getProfileConnectionPolicy(device, BluetoothProfile.MAP_CLIENT))
                 .thenReturn(priority);
     }
 
@@ -124,7 +125,7 @@ public class MapClientTest {
         Assert.assertNull(mService.getInstanceMap().get(device));
 
         // connect a bluetooth device
-        mockDevicePriority(device, BluetoothProfile.PRIORITY_ON);
+        mockDevicePriority(device, BluetoothProfile.CONNECTION_POLICY_ALLOWED);
         Assert.assertTrue(mService.connect(device));
 
         // is the statemachine created
@@ -137,13 +138,14 @@ public class MapClientTest {
      * Test that a PRIORITY_OFF device is not connected to
      */
     @Test
+    @FlakyTest
     public void testConnectPriorityOffDevice() {
         // make sure there is no statemachine already defined for this device
         BluetoothDevice device = makeBluetoothDevice("11:11:11:11:11:11");
         Assert.assertNull(mService.getInstanceMap().get(device));
 
         // connect a bluetooth device
-        mockDevicePriority(device, BluetoothProfile.PRIORITY_OFF);
+        mockDevicePriority(device, BluetoothProfile.CONNECTION_POLICY_FORBIDDEN);
         Assert.assertFalse(mService.connect(device));
 
         // is the statemachine created
@@ -171,7 +173,7 @@ public class MapClientTest {
 
         // run the test - connect all devices, set their priorities to on
         for (BluetoothDevice d : list) {
-            mockDevicePriority(d, BluetoothProfile.PRIORITY_ON);
+            mockDevicePriority(d, BluetoothProfile.CONNECTION_POLICY_ALLOWED);
             Assert.assertTrue(mService.connect(d));
         }
 

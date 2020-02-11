@@ -112,8 +112,8 @@ public class HeadsetStateMachineTest {
                 InstrumentationRegistry.getTargetContext().getResources());
         when(mHeadsetService.getPackageManager()).thenReturn(
                 InstrumentationRegistry.getContext().getPackageManager());
-        when(mHeadsetService.getPriority(any(BluetoothDevice.class))).thenReturn(
-                BluetoothProfile.PRIORITY_ON);
+        when(mHeadsetService.getConnectionPolicy(any(BluetoothDevice.class))).thenReturn(
+                BluetoothProfile.CONNECTION_POLICY_ALLOWED);
         when(mHeadsetService.getForceScoAudio()).thenReturn(true);
         when(mHeadsetService.okToAcceptConnection(any(BluetoothDevice.class))).thenReturn(true);
         when(mHeadsetService.isScoAcceptable(any(BluetoothDevice.class))).thenReturn(true);
@@ -832,7 +832,7 @@ public class HeadsetStateMachineTest {
     public void testAtBiaEvent_initialSubscriptionWithUpdates() {
         setUpConnectedState();
         verify(mPhoneState).listenForPhoneState(mTestDevice, PhoneStateListener.LISTEN_SERVICE_STATE
-                | PhoneStateListener.LISTEN_SIGNAL_STRENGTHS);
+                | PhoneStateListener.LISTEN_ALWAYS_REPORTED_SIGNAL_STRENGTH);
         mHeadsetStateMachine.sendMessage(HeadsetStateMachine.STACK_EVENT,
                 new HeadsetStackEvent(HeadsetStackEvent.EVENT_TYPE_BIA,
                         new HeadsetAgIndicatorEnableState(true, true, false, false), mTestDevice));
@@ -842,7 +842,7 @@ public class HeadsetStateMachineTest {
                 new HeadsetStackEvent(HeadsetStackEvent.EVENT_TYPE_BIA,
                         new HeadsetAgIndicatorEnableState(false, true, true, false), mTestDevice));
         verify(mPhoneState, timeout(ASYNC_CALL_TIMEOUT_MILLIS)).listenForPhoneState(mTestDevice,
-                PhoneStateListener.LISTEN_SIGNAL_STRENGTHS);
+                PhoneStateListener.LISTEN_ALWAYS_REPORTED_SIGNAL_STRENGTH);
         mHeadsetStateMachine.sendMessage(HeadsetStateMachine.STACK_EVENT,
                 new HeadsetStackEvent(HeadsetStackEvent.EVENT_TYPE_BIA,
                         new HeadsetAgIndicatorEnableState(false, true, false, false), mTestDevice));

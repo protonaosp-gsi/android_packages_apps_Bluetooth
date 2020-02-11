@@ -31,8 +31,8 @@ import android.os.Looper;
 import android.os.Message;
 import android.os.ParcelUuid;
 import android.util.Log;
-import android.util.StatsLog;
 
+import com.android.bluetooth.BluetoothStatsLog;
 import com.android.bluetooth.R;
 import com.android.bluetooth.Utils;
 import com.android.bluetooth.hfp.HeadsetHalConstants;
@@ -311,10 +311,11 @@ final class RemoteDevices {
         /**
          * @param mBondState the mBondState to set
          */
-        void setBondState(int mBondState) {
+        void setBondState(int newBondState) {
             synchronized (mObject) {
-                this.mBondState = mBondState;
-                if (mBondState == BluetoothDevice.BOND_NONE) {
+                if ((mBondState == BluetoothDevice.BOND_BONDED
+                        && newBondState == BluetoothDevice.BOND_BONDING)
+                        || newBondState == BluetoothDevice.BOND_NONE) {
                     /* Clearing the Uuids local copy when the device is unpaired. If not cleared,
                     cachedBluetoothDevice issued a connect using the local cached copy of uuids,
                     without waiting for the ACTION_UUID intent.
@@ -322,6 +323,7 @@ final class RemoteDevices {
                     mUuids = null;
                     mAlias = null;
                 }
+                mBondState = newBondState;
             }
         }
 
@@ -332,6 +334,14 @@ final class RemoteDevices {
             synchronized (mObject) {
                 return mBondState;
             }
+        }
+
+        boolean isBonding() {
+            return getBondState() == BluetoothDevice.BOND_BONDING;
+        }
+
+        boolean isBondingOrBonded() {
+            return isBonding() || getBondState() == BluetoothDevice.BOND_BONDED;
         }
 
         /**
@@ -642,11 +652,11 @@ final class RemoteDevices {
 
         int connectionState = newState == AbstractionLayer.BT_ACL_STATE_CONNECTED
                 ? BluetoothAdapter.STATE_CONNECTED : BluetoothAdapter.STATE_DISCONNECTED;
-        StatsLog.write(StatsLog.BLUETOOTH_ACL_CONNECTION_STATE_CHANGED,
+        BluetoothStatsLog.write(BluetoothStatsLog.BLUETOOTH_ACL_CONNECTION_STATE_CHANGED,
                 sAdapterService.obfuscateAddress(device), connectionState);
         BluetoothClass deviceClass = device.getBluetoothClass();
         int classOfDevice = deviceClass == null ? 0 : deviceClass.getClassOfDevice();
-        StatsLog.write(StatsLog.BLUETOOTH_CLASS_OF_DEVICE_REPORTED,
+        BluetoothStatsLog.write(BluetoothStatsLog.BLUETOOTH_CLASS_OF_DEVICE_REPORTED,
                 sAdapterService.obfuscateAddress(device), classOfDevice);
 
         if (intent != null) {

@@ -43,10 +43,10 @@ import android.os.SystemProperties;
 import android.os.UserHandle;
 import android.util.Log;
 import android.util.Pair;
-import android.util.StatsLog;
 
 import androidx.annotation.VisibleForTesting;
 
+import com.android.bluetooth.BluetoothStatsLog;
 import com.android.bluetooth.Utils;
 import com.android.bluetooth.btservice.RemoteDevices.DeviceProperties;
 
@@ -580,8 +580,8 @@ class AdapterProperties {
         Log.d(TAG,
                 "PROFILE_CONNECTION_STATE_CHANGE: profile=" + profile + ", device=" + device + ", "
                         + prevState + " -> " + state);
-        StatsLog.write(StatsLog.BLUETOOTH_CONNECTION_STATE_CHANGED, state, 0 /* deprecated */,
-                profile, mService.obfuscateAddress(device));
+        BluetoothStatsLog.write(BluetoothStatsLog.BLUETOOTH_CONNECTION_STATE_CHANGED, state,
+                0 /* deprecated */, profile, mService.obfuscateAddress(device));
 
         if (!isNormalStateTransition(prevState, state)) {
             Log.w(TAG,
@@ -912,15 +912,6 @@ class AdapterProperties {
     void onBleDisable() {
         // Sequence BLE_ON to STATE_OFF - that is _complete_ OFF state.
         debugLog("onBleDisable");
-        // Set the scan_mode to NONE (no incoming connections).
-        setScanMode(AbstractionLayer.BT_SCAN_MODE_NONE);
-    }
-
-    void onBluetoothDisable() {
-        // From STATE_ON to BLE_ON
-        debugLog("onBluetoothDisable()");
-        // Turn off any Device Search/Inquiry
-        mService.cancelDiscovery();
         // Set the scan_mode to NONE (no incoming connections).
         setScanMode(AbstractionLayer.BT_SCAN_MODE_NONE);
     }

@@ -50,7 +50,6 @@ import android.os.Message;
 import android.os.PowerManager;
 import android.os.UserManager;
 import android.telephony.TelephonyManager;
-import android.text.TextUtils;
 import android.util.Log;
 
 import com.android.bluetooth.IObexConnectionHandler;
@@ -417,8 +416,17 @@ public class BluetoothPbapService extends ProfileService implements IObexConnect
         }
     }
 
-    int getConnectionState(BluetoothDevice device) {
-        enforceCallingOrSelfPermission(BLUETOOTH_PERM, "Need BLUETOOTH permission");
+    /**
+     * Get the current connection state of PBAP with the passed in device
+     *
+     * @param device is the device whose connection state to PBAP we are trying to get
+     * @return current connection state, one of {@link BluetoothProfile#STATE_DISCONNECTED},
+     * {@link BluetoothProfile#STATE_CONNECTING}, {@link BluetoothProfile#STATE_CONNECTED}, or
+     * {@link BluetoothProfile#STATE_DISCONNECTING}
+     */
+    public int getConnectionState(BluetoothDevice device) {
+        enforceCallingOrSelfPermission(
+                BLUETOOTH_PRIVILEGED, "Need BLUETOOTH_PRIVILEGED permission");
         if (mPbapStateMachineMap == null) {
             return BluetoothProfile.STATE_DISCONNECTED;
         }
@@ -460,7 +468,38 @@ public class BluetoothPbapService extends ProfileService implements IObexConnect
         return devices;
     }
 
-    void disconnect(BluetoothDevice device) {
+    /**
+     * Disconnects Pbap if connectionPolicy is {@link BluetoothProfile#CONNECTION_POLICY_FORBIDDEN}.
+     *
+     * <p> The device should already be paired.
+     * Connection policy can be one of:
+     * {@link BluetoothProfile#CONNECTION_POLICY_ALLOWED},
+     * {@link BluetoothProfile#CONNECTION_POLICY_FORBIDDEN},
+     * {@link BluetoothProfile#CONNECTION_POLICY_UNKNOWN}
+     *
+     * @param device Paired bluetooth device
+     * @param connectionPolicy determines whether pbap should be disconnected
+     * @return true if pbap is disconnected, false otherwise
+     */
+    public boolean setConnectionPolicy(BluetoothDevice device, int connectionPolicy) {
+        enforceCallingOrSelfPermission(
+                BLUETOOTH_PRIVILEGED, "Need BLUETOOTH_PRIVILEGED permission");
+        if (DEBUG) {
+            Log.d(TAG, "setConnectionPolicy: device " + device
+                    + " and connectionPolicy " + connectionPolicy);
+        }
+        if (connectionPolicy == BluetoothProfile.CONNECTION_POLICY_FORBIDDEN) {
+            disconnect(device);
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Disconnects pbap server profile with device
+     * @param device is the remote bluetooth device
+     */
+    public void disconnect(BluetoothDevice device) {
         enforceCallingOrSelfPermission(BLUETOOTH_ADMIN_PERM, "Need BLUETOOTH_ADMIN permission");
         synchronized (mPbapStateMachineMap) {
             PbapStateMachine sm = mPbapStateMachineMap.get(device);
@@ -645,6 +684,19 @@ public class BluetoothPbapService extends ProfileService implements IObexConnect
         }
 
         @Override
+        public boolean setConnectionPolicy(BluetoothDevice device, int connectionPolicy) {
+            if (DEBUG) {
+                Log.d(TAG, "setConnectionPolicy for device: " + device + ", policy:"
+                        + connectionPolicy);
+            }
+            BluetoothPbapService service = getService();
+            if (service == null) {
+                return false;
+            }
+            return service.setConnectionPolicy(device, connectionPolicy);
+        }
+
+        @Override
         public void disconnect(BluetoothDevice device) {
             if (DEBUG) {
                 Log.d(TAG, "disconnect");
@@ -777,10 +829,7 @@ public class BluetoothPbapService extends ProfileService implements IObexConnect
         TelephonyManager tm = (TelephonyManager) getSystemService(Context.TELEPHONY_SERVICE);
         if (tm != null) {
             sLocalPhoneNum = tm.getLine1Number();
-            sLocalPhoneName = tm.getLine1AlphaTag();
-            if (TextUtils.isEmpty(sLocalPhoneName)) {
-                sLocalPhoneName = this.getString(R.string.localPhoneName);
-            }
+            sLocalPhoneName = this.getString(R.string.localPhoneName);
         }
         if (VERBOSE)
             Log.v(TAG, "Local Phone Details- Number:" + sLocalPhoneNum

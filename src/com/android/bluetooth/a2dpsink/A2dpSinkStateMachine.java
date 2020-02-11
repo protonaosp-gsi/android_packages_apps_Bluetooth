@@ -15,8 +15,6 @@
  */
 package com.android.bluetooth.a2dpsink;
 
-import static android.bluetooth.BluetoothProfile.PRIORITY_OFF;
-
 import android.bluetooth.BluetoothA2dpSink;
 import android.bluetooth.BluetoothAudioConfig;
 import android.bluetooth.BluetoothDevice;
@@ -30,8 +28,8 @@ import com.android.bluetooth.BluetoothMetricsProto;
 import com.android.bluetooth.Utils;
 import com.android.bluetooth.btservice.MetricsLogger;
 import com.android.bluetooth.btservice.ProfileService;
-import com.android.internal.util.State;
-import com.android.internal.util.StateMachine;
+import com.android.bluetooth.statemachine.State;
+import com.android.bluetooth.statemachine.StateMachine;
 
 
 public class A2dpSinkStateMachine extends StateMachine {
@@ -171,7 +169,8 @@ public class A2dpSinkStateMachine extends StateMachine {
                 case StackEvent.EVENT_TYPE_CONNECTION_STATE_CHANGED:
                     switch (event.mState) {
                         case StackEvent.CONNECTION_STATE_CONNECTING:
-                            if (mService.getPriority(mDevice) == PRIORITY_OFF) {
+                            if (mService.getConnectionPolicy(mDevice)
+                                    == BluetoothProfile.CONNECTION_POLICY_FORBIDDEN) {
                                 Log.w(TAG, "Ignore incoming connection, profile is"
                                         + " turned off for " + mDevice);
                                 mService.disconnectA2dpNative(mDeviceAddress);

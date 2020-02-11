@@ -33,13 +33,14 @@ import android.telephony.PhoneNumberUtils;
 import android.telephony.PhoneStateListener;
 import android.text.TextUtils;
 import android.util.Log;
-import android.util.StatsLog;
 
+import com.android.bluetooth.BluetoothStatsLog;
+import com.android.bluetooth.Utils;
 import com.android.bluetooth.btservice.AdapterService;
 import com.android.bluetooth.btservice.ProfileService;
+import com.android.bluetooth.statemachine.State;
+import com.android.bluetooth.statemachine.StateMachine;
 import com.android.internal.annotations.VisibleForTesting;
-import com.android.internal.util.State;
-import com.android.internal.util.StateMachine;
 
 import java.io.FileDescriptor;
 import java.io.PrintWriter;
@@ -306,7 +307,7 @@ public class HeadsetStateMachine extends StateMachine {
         // Should not be called from enter() method
         void broadcastAudioState(BluetoothDevice device, int fromState, int toState) {
             stateLogD("broadcastAudioState: " + device + ": " + fromState + "->" + toState);
-            StatsLog.write(StatsLog.BLUETOOTH_SCO_CONNECTION_STATE_CHANGED,
+            BluetoothStatsLog.write(BluetoothStatsLog.BLUETOOTH_SCO_CONNECTION_STATE_CHANGED,
                     mAdapterService.obfuscateAddress(device),
                     getConnectionStateFromAudioState(toState),
                     TextUtils.equals(mAudioParams.get(HEADSET_WBS), HEADSET_AUDIO_FEATURE_ON)
@@ -392,8 +393,8 @@ public class HeadsetStateMachine extends StateMachine {
             logi(getName() + ": currentDevice=" + mDevice + ", msg=" + msg);
         }
 
-        void stateLogWtfStack(String msg) {
-            Log.wtfStack(TAG, getName() + ": " + msg);
+        void stateLogWtf(String msg) {
+            Log.wtf(TAG, getName() + ": " + msg);
         }
 
         /**
@@ -518,8 +519,9 @@ public class HeadsetStateMachine extends StateMachine {
                         stateLogI("accept incoming connection");
                         transitionTo(mConnecting);
                     } else {
-                        stateLogI("rejected incoming HF, priority=" + mHeadsetService.getPriority(
-                                mDevice) + " bondState=" + mAdapterService.getBondState(mDevice));
+                        stateLogI("rejected incoming HF, connectionPolicy="
+                                + mHeadsetService.getConnectionPolicy(mDevice) + " bondState="
+                                + mAdapterService.getBondState(mDevice));
                         // Reject the connection and stay in Disconnected state itself
                         if (!mNativeInterface.disconnectHfp(mDevice)) {
                             stateLogE("failed to disconnect");
@@ -841,8 +843,6 @@ public class HeadsetStateMachine extends StateMachine {
                     break;
                 }
                 case CALL_STATE_CHANGED: {
-                    if (mDeviceSilenced) break;
-
                     HeadsetCallState callState = (HeadsetCallState) message.obj;
                     if (!mNativeInterface.phoneStateChange(mDevice, callState)) {
                         stateLogW("processCallState: failed to update call state " + callState);
@@ -1587,7 +1587,7 @@ public class HeadsetStateMachine extends StateMachine {
             if (number.charAt(number.length() - 1) == ';') {
                 number = number.substring(0, number.length() - 1);
             }
-            dialNumber = PhoneNumberUtils.convertPreDial(number);
+            dialNumber = Utils.convertPreDial(number);
         }
         if (!mHeadsetService.dialOutgoingCall(mDevice, dialNumber)) {
             Log.w(TAG, "processDialCall, failed to dial in service");
@@ -1868,7 +1868,7 @@ public class HeadsetStateMachine extends StateMachine {
         String vendorId = deviceInfo[0];
         String productId = deviceInfo[1];
         String version = deviceInfo[2];
-        StatsLog.write(StatsLog.BLUETOOTH_DEVICE_INFO_REPORTED,
+        BluetoothStatsLog.write(BluetoothStatsLog.BLUETOOTH_DEVICE_INFO_REPORTED,
                 mAdapterService.obfuscateAddress(device), BluetoothProtoEnums.DEVICE_INFO_INTERNAL,
                 BluetoothHeadset.VENDOR_SPECIFIC_HEADSET_EVENT_XAPL, vendorId, productId, version,
                 null);
@@ -2022,7 +2022,7 @@ public class HeadsetStateMachine extends StateMachine {
             events |= PhoneStateListener.LISTEN_SERVICE_STATE;
         }
         if (mAgIndicatorEnableState != null && mAgIndicatorEnableState.signal) {
-            events |= PhoneStateListener.LISTEN_SIGNAL_STRENGTHS;
+            events |= PhoneStateListener.LISTEN_ALWAYS_REPORTED_SIGNAL_STRENGTH;
         }
         mSystemInterface.getHeadsetPhoneState().listenForPhoneState(mDevice, events);
     }
