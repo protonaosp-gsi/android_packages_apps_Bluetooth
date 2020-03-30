@@ -491,8 +491,10 @@ public class AdapterService extends Service {
         }.execute();
 
         try {
-            int systemUiUid = getApplicationContext().getPackageManager().getPackageUid(
-                    "com.android.systemui", PackageManager.MATCH_SYSTEM_ONLY);
+            int systemUiUid = getApplicationContext()
+                    .createContextAsUser(UserHandle.SYSTEM, /* flags= */ 0)
+                    .getPackageManager()
+                    .getPackageUid("com.android.systemui", PackageManager.MATCH_SYSTEM_ONLY);
 
             Utils.setSystemUiUid(systemUiUid);
         } catch (PackageManager.NameNotFoundException e) {
@@ -1255,7 +1257,7 @@ public class AdapterService extends Service {
                 return false;
             }
 
-            enforceBluetoothPrivilegedPermission(service);
+            enforceBluetoothPermission(service);
 
             service.mAdapterProperties.setDiscoverableTimeout(duration);
             return service.mAdapterProperties.setScanMode(convertScanModeToHal(mode));
@@ -1329,7 +1331,7 @@ public class AdapterService extends Service {
                 return -1;
             }
 
-            enforceBluetoothPermission(service);
+            enforceBluetoothPrivilegedPermission(service);
 
             return service.mAdapterProperties.discoveryEndMillis();
         }
@@ -1404,7 +1406,7 @@ public class AdapterService extends Service {
                 return false;
             }
 
-            enforceBluetoothPrivilegedPermission(service);
+            enforceBluetoothAdminPermission(service);
 
             DeviceProperties deviceProp = service.mRemoteDevices.getDeviceProperties(device);
             if (deviceProp != null) {
@@ -1456,7 +1458,7 @@ public class AdapterService extends Service {
                 return false;
             }
 
-            enforceBluetoothPrivilegedPermission(service);
+            enforceBluetoothPermission(service);
 
             DeviceProperties deviceProp = service.mRemoteDevices.getDeviceProperties(device);
             return deviceProp != null && deviceProp.isBondingInitiatedLocally();
@@ -1580,7 +1582,7 @@ public class AdapterService extends Service {
                 return false;
             }
 
-            enforceBluetoothPrivilegedPermission(service);
+            enforceBluetoothPermission(service);
 
             DeviceProperties deviceProp = service.mRemoteDevices.getDeviceProperties(device);
             if (deviceProp == null) {
@@ -1732,7 +1734,7 @@ public class AdapterService extends Service {
                 return BluetoothDevice.ACCESS_UNKNOWN;
             }
 
-            enforceBluetoothPrivilegedPermission(service);
+            enforceBluetoothPermission(service);
 
             return service.getDeviceAccessFromPrefs(device, PHONEBOOK_ACCESS_PERMISSION_PREFERENCE_FILE);
         }
@@ -1757,7 +1759,7 @@ public class AdapterService extends Service {
                 return BluetoothDevice.ACCESS_UNKNOWN;
             }
 
-            enforceBluetoothPrivilegedPermission(service);
+            enforceBluetoothPermission(service);
 
             return service.getDeviceAccessFromPrefs(device, MESSAGE_ACCESS_PERMISSION_PREFERENCE_FILE);
         }
@@ -1833,7 +1835,7 @@ public class AdapterService extends Service {
                 return BluetoothDevice.BATTERY_LEVEL_UNKNOWN;
             }
 
-            enforceBluetoothPrivilegedPermission(service);
+            enforceBluetoothPermission(service);
 
             DeviceProperties deviceProp = service.mRemoteDevices.getDeviceProperties(device);
             if (deviceProp == null) {
@@ -1897,7 +1899,7 @@ public class AdapterService extends Service {
         @Override
         public void unregisterCallback(IBluetoothCallback callback) {
             AdapterService service = getService();
-            if (service == null) {
+            if (service == null || service.mCallbacks == null) {
                 return;
             }
 
@@ -3002,6 +3004,19 @@ public class AdapterService extends Service {
         return obfuscateAddressNative(Utils.getByteAddress(device));
     }
 
+    /**
+     *  Get an incremental id of Bluetooth metrics and log
+     *
+     *  @param device Bluetooth device
+     *  @return int of id for Bluetooth metrics and logging, 0 if the device is invalid
+     */
+    public int getMetricId(BluetoothDevice device) {
+        if (device == null) {
+            return 0;
+        }
+        return getMetricIdNative(Utils.getByteAddress(device));
+    }
+
     static native void classInitNative();
 
     native boolean initNative(boolean startRestricted, boolean isNiapMode);
@@ -3080,6 +3095,8 @@ public class AdapterService extends Service {
     private native void interopDatabaseAddNative(int feature, byte[] address, int length);
 
     private native byte[] obfuscateAddressNative(byte[] address);
+
+    private native int getMetricIdNative(byte[] address);
 
     /*package*/ native int connectSocketNative(
             byte[] address, int type, byte[] uuid, int port, int flag, int callingUid);
