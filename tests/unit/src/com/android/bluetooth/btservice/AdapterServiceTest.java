@@ -33,6 +33,7 @@ import android.os.Looper;
 import android.os.PowerManager;
 import android.os.Process;
 import android.os.SystemProperties;
+import android.os.UserHandle;
 import android.os.UserManager;
 import android.test.mock.MockContentResolver;
 import android.util.Log;
@@ -130,6 +131,8 @@ public class AdapterServiceTest {
         when(mMockContext.getApplicationInfo()).thenReturn(mMockApplicationInfo);
         when(mMockContext.getContentResolver()).thenReturn(mMockContentResolver);
         when(mMockContext.getApplicationContext()).thenReturn(mMockContext);
+        when(mMockContext.createContextAsUser(UserHandle.SYSTEM, /* flags= */ 0)).thenReturn(
+                mMockContext);
         when(mMockContext.getResources()).thenReturn(mMockResources);
         when(mMockContext.getUserId()).thenReturn(Process.BLUETOOTH_UID);
         when(mMockContext.getPackageManager()).thenReturn(mMockPackageManager);
@@ -715,5 +718,82 @@ public class AdapterServiceTest {
             }
         }
         return true;
+    }
+
+    /**
+     * Test: Get id for null address
+     * Check if returned value from {@link AdapterService#getMetricId(BluetoothDevice)} is
+     * 0 when device address is null
+     */
+    @Test
+    public void testGetMetricId_NullAddress() {
+        Assert.assertEquals(mAdapterService.getMetricId(null), 0);
+    }
+
+    /**
+     * Test: Get id when Bluetooth is disabled
+     * Check whether the returned value meets expectation
+     */
+    @Test
+    public void testGetMetricId_BluetoothDisabled() {
+        Assert.assertFalse(mAdapterService.getState() == BluetoothAdapter.STATE_ON);
+        BluetoothDevice device = TestUtils.getTestDevice(BluetoothAdapter.getDefaultAdapter(), 0);
+        int id = mAdapterService.getMetricId(device);
+        Assert.assertTrue(id > 0);
+    }
+
+    /**
+     * Test: Get id when Bluetooth is enabled
+     * Check whether the returned value meets expectation
+     */
+    @Test
+    public void testGetMetricId_BluetoothEnabled() {
+        Assert.assertFalse(mAdapterService.getState() == BluetoothAdapter.STATE_ON);
+        doEnable(0, false);
+        Assert.assertTrue(mAdapterService.getState() == BluetoothAdapter.STATE_ON);
+        BluetoothDevice device = TestUtils.getTestDevice(BluetoothAdapter.getDefaultAdapter(), 0);
+        int id = mAdapterService.getMetricId(device);
+        Assert.assertTrue(id > 0);
+    }
+
+    /**
+     * Test: Check if id gotten stays the same after toggling Bluetooth
+     */
+    @Test
+    public void testGetMetricId_PersistentBetweenToggle() {
+        Assert.assertFalse(mAdapterService.getState() == BluetoothAdapter.STATE_ON);
+        BluetoothDevice device = TestUtils.getTestDevice(BluetoothAdapter.getDefaultAdapter(), 0);
+        int id1 = mAdapterService.getMetricId(device);
+        Assert.assertTrue(id1 > 0);
+
+        // Enable
+        doEnable(0, false);
+        Assert.assertTrue(mAdapterService.getState() == BluetoothAdapter.STATE_ON);
+        int id2 = mAdapterService.getMetricId(device);
+        Assert.assertEquals(id2, id1);
+
+        // Disable
+        doDisable(0, false);
+        Assert.assertFalse(mAdapterService.getState() == BluetoothAdapter.STATE_ON);
+        int id3 = mAdapterService.getMetricId(device);
+        Assert.assertEquals(id3, id1);
+    }
+
+    /**
+     * Test: Check if id gotten stays the same after re-initializing
+     *       {@link AdapterService}
+     */
+    @Test
+    public void testgetMetricId_PersistentBetweenAdapterServiceInitialization() throws
+            PackageManager.NameNotFoundException {
+        Assert.assertFalse(mAdapterService.getState() == BluetoothAdapter.STATE_ON);
+        BluetoothDevice device = TestUtils.getTestDevice(BluetoothAdapter.getDefaultAdapter(), 0);
+        int id1 = mAdapterService.getMetricId(device);
+        Assert.assertTrue(id1 > 0);
+        tearDown();
+        setUp();
+        Assert.assertFalse(mAdapterService.getState() == BluetoothAdapter.STATE_ON);
+        int id2 = mAdapterService.getMetricId(device);
+        Assert.assertEquals(id2, id1);
     }
 }
