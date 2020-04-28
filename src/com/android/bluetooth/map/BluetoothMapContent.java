@@ -2191,6 +2191,10 @@ public class BluetoothMapContent {
             fi.mPhoneType = tm.getPhoneType();
             fi.mPhoneNum = tm.getLine1Number();
             fi.mPhoneAlphaTag = tm.getLine1AlphaTag();
+            if (D) {
+                Log.d(TAG, "phone type = " + fi.mPhoneType + " phone num = " + fi.mPhoneNum
+                        + " phone alpha tag = " + fi.mPhoneAlphaTag);
+            }
         }
     }
 

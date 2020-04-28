@@ -198,8 +198,6 @@ public class AdapterService extends Service {
     private SilenceDeviceManager mSilenceDeviceManager;
     private AppOpsManager mAppOps;
 
-    private BluetoothSocketManagerBinder mBluetoothSocketManagerBinder;
-
     /**
      * Register a {@link ProfileService} with AdapterService.
      *
@@ -395,7 +393,7 @@ public class AdapterService extends Service {
         mAdapterProperties = new AdapterProperties(this);
         mAdapterStateMachine = AdapterState.make(this);
         mJniCallbacks = new JniCallbacks(this, mAdapterProperties);
-        initNative(isGuest(), isSingleUserMode());
+        initNative(isGuest(), isNiapMode());
         mNativeAvailable = true;
         mCallbacks = new RemoteCallbackList<IBluetoothCallback>();
         mAppOps = getSystemService(AppOpsManager.class);
@@ -434,8 +432,6 @@ public class AdapterService extends Service {
                 Looper.getMainLooper());
         mSilenceDeviceManager.start();
 
-        mBluetoothSocketManagerBinder = new BluetoothSocketManagerBinder(this);
-
         setAdapterService(this);
 
         // First call to getSharedPreferences will result in a file read into
@@ -458,6 +454,7 @@ public class AdapterService extends Service {
                     "com.android.systemui", PackageManager.MATCH_SYSTEM_ONLY,
                     UserHandle.USER_SYSTEM);
             Utils.setSystemUiUid(systemUiUid);
+            setSystemUiUidNative(systemUiUid);
         } catch (PackageManager.NameNotFoundException e) {
             // Some platforms, such as wearables do not have a system ui.
             Log.w(TAG, "Unable to resolve SystemUI's UID.", e);
@@ -468,6 +465,7 @@ public class AdapterService extends Service {
                 filter, null, null);
         int fuid = ActivityManager.getCurrentUser();
         Utils.setForegroundUserId(fuid);
+        setForegroundUserIdNative(fuid);
     }
 
     @Override
@@ -500,6 +498,7 @@ public class AdapterService extends Service {
             if (Intent.ACTION_USER_SWITCHED.equals(intent.getAction())) {
                 int fuid = intent.getIntExtra(Intent.EXTRA_USER_HANDLE, 0);
                 Utils.setForegroundUserId(fuid);
+                setForegroundUserIdNative(fuid);
             }
         }
     };
@@ -736,11 +735,6 @@ public class AdapterService extends Service {
 
         if (mProfileServicesState != null) {
             mProfileServicesState.clear();
-        }
-
-        if (mBluetoothSocketManagerBinder != null) {
-            mBluetoothSocketManagerBinder.cleanUp();
-            mBluetoothSocketManagerBinder = null;
         }
 
         if (mBinder != null) {
@@ -1565,7 +1559,6 @@ public class AdapterService extends Service {
             if (service == null) {
                 return false;
             }
-            service.disable();
             return service.factoryReset();
 
         }
@@ -2320,6 +2313,8 @@ public class AdapterService extends Service {
     }
 
     boolean setPhonebookAccessPermission(BluetoothDevice device, int value) {
+        enforceCallingOrSelfPermission(BLUETOOTH_PRIVILEGED,
+                "Need BLUETOOTH PRIVILEGED permission");
         SharedPreferences pref = getSharedPreferences(PHONEBOOK_ACCESS_PERMISSION_PREFERENCE_FILE,
                 Context.MODE_PRIVATE);
         SharedPreferences.Editor editor = pref.edit();
@@ -2396,7 +2391,12 @@ public class AdapterService extends Service {
     }
 
     IBluetoothSocketManager getSocketManager() {
-        return IBluetoothSocketManager.Stub.asInterface(mBluetoothSocketManagerBinder);
+        android.os.IBinder obj = getSocketManagerNative();
+        if (obj == null) {
+            return null;
+        }
+
+        return IBluetoothSocketManager.Stub.asInterface(obj);
     }
 
     boolean factoryReset() {
@@ -2870,8 +2870,8 @@ public class AdapterService extends Service {
         return UserManager.get(this).isGuestUser();
     }
 
-    private boolean isSingleUserMode() {
-        return UserManager.get(this).hasUserRestriction(UserManager.DISALLOW_ADD_USER);
+    private boolean isNiapMode() {
+        return Settings.Global.getInt(getContentResolver(), "niap_mode", 0) == 1;
     }
 
     /**
@@ -2890,7 +2890,7 @@ public class AdapterService extends Service {
 
     static native void classInitNative();
 
-    native boolean initNative(boolean startRestricted, boolean isSingleUserMode);
+    native boolean initNative(boolean startRestricted, boolean isNiapMode);
 
     native void cleanupNative();
 
@@ -2952,6 +2952,12 @@ public class AdapterService extends Service {
 
     private native int readEnergyInfo();
 
+    private native IBinder getSocketManagerNative();
+
+    private native void setSystemUiUidNative(int systemUiUid);
+
+    private static native void setForegroundUserIdNative(int foregroundUserId);
+
     /*package*/
     native boolean factoryResetNative();
 
@@ -2966,14 +2972,6 @@ public class AdapterService extends Service {
     private native void interopDatabaseAddNative(int feature, byte[] address, int length);
 
     private native byte[] obfuscateAddressNative(byte[] address);
-
-    /*package*/ native int connectSocketNative(
-            byte[] address, int type, byte[] uuid, int port, int flag, int callingUid);
-
-    /*package*/ native int createSocketChannelNative(
-            int type, String serviceName, byte[] uuid, int port, int flag, int callingUid);
-
-    /*package*/ native void requestMaximumTxDataLengthNative(byte[] address);
 
     // Returns if this is a mock object. This is currently used in testing so that we may not call
     // System.exit() while finalizing the object. Otherwise GC of mock objects unfortunately ends up

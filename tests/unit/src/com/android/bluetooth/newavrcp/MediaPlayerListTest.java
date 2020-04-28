@@ -139,7 +139,7 @@ public class MediaPlayerListTest {
     }
 
     @Test
-    public void testUpdateMeidaDataForAudioPlaybackWhenAcitvePlayNotPlaying() {
+    public void testUpdateMeidaDataForAudioPlaybackWhenActivePlayNotPlaying() {
         // Verify update media data with playing state
         doReturn(prepareMediaData(PlaybackState.STATE_PAUSED))
             .when(mMockPlayerWrapper).getCurrentMediaData();
@@ -171,7 +171,7 @@ public class MediaPlayerListTest {
     }
 
     @Test
-    public void testNotUdpateMediaDataForAudioPlaybackWhenActivePlayerIsPlaying() {
+    public void testNotUpdateMediaDataForAudioPlaybackWhenActivePlayerIsPlaying() {
         // Verify not update media data for Audio Playback when active player is playing
         doReturn(prepareMediaData(PlaybackState.STATE_PLAYING))
             .when(mMockPlayerWrapper).getCurrentMediaData();
@@ -181,7 +181,7 @@ public class MediaPlayerListTest {
     }
 
     @Test
-    public void testNotUdpateMediaDataForActivePlayerWhenAudioPlaybackIsActive() {
+    public void testNotUpdateMediaDataForActivePlayerWhenAudioPlaybackIsActive() {
         doReturn(prepareMediaData(PlaybackState.STATE_PLAYING))
             .when(mMockPlayerWrapper).getCurrentMediaData();
         mMediaPlayerList.injectAudioPlaybacActive(true);

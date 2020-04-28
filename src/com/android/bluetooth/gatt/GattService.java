@@ -340,25 +340,25 @@ public class GattService extends ProfileService {
                 Log.d(TAG, "Binder is dead - unregistering scanner (" + mScannerId + ")!");
             }
 
-            ScanClient client = getScanClient(mScannerId);
-            if (client != null) {
+            if (isScanClient(mScannerId)) {
+                ScanClient client = new ScanClient(mScannerId);
                 client.appDied = true;
-                stopScan(client.scannerId);
+                stopScan(client);
             }
         }
 
-        private ScanClient getScanClient(int clientIf) {
+        private boolean isScanClient(int clientIf) {
             for (ScanClient client : mScanManager.getRegularScanQueue()) {
                 if (client.scannerId == clientIf) {
-                    return client;
+                    return true;
                 }
             }
             for (ScanClient client : mScanManager.getBatchScanQueue()) {
                 if (client.scannerId == clientIf) {
-                    return client;
+                    return true;
                 }
             }
-            return null;
+            return false;
         }
     }
 
@@ -500,7 +500,7 @@ public class GattService extends ProfileService {
             if (service == null) {
                 return;
             }
-            service.stopScan(scannerId);
+            service.stopScan(new ScanClient(scannerId));
         }
 
         @Override
@@ -1031,7 +1031,7 @@ public class GattService extends ProfileService {
             } catch (RemoteException | PendingIntent.CanceledException e) {
                 Log.e(TAG, "Exception: " + e);
                 mScannerMap.remove(client.scannerId);
-                mScanManager.stopScan(client.scannerId);
+                mScanManager.stopScan(client);
             }
         }
     }
@@ -1043,7 +1043,7 @@ public class GattService extends ProfileService {
         try {
             sendResultsByPendingIntent(pii, results, callbackType);
         } catch (PendingIntent.CanceledException e) {
-            stopScan(client.scannerId);
+            stopScan(client);
             unregisterScanner(client.scannerId);
         }
     }
@@ -1595,7 +1595,7 @@ public class GattService extends ProfileService {
         } catch (RemoteException | PendingIntent.CanceledException e) {
             Log.e(TAG, "Exception: " + e);
             mScannerMap.remove(client.scannerId);
-            mScanManager.stopScan(client.scannerId);
+            mScanManager.stopScan(client);
         }
     }
 
@@ -1961,10 +1961,15 @@ public class GattService extends ProfileService {
                 Utils.checkCallerHasNetworkSetupWizardPermission(this);
 
         AppScanStats app = mScannerMap.getAppScanStatsById(scannerId);
+        ScannerMap.App cbApp = mScannerMap.getById(scannerId);
         if (app != null) {
             scanClient.stats = app;
             boolean isFilteredScan = (filters != null) && !filters.isEmpty();
-            app.recordScanStart(settings, isFilteredScan, scannerId);
+            boolean isCallbackScan = false;
+            if (cbApp != null) {
+                isCallbackScan = cbApp.callback != null;
+            }
+            app.recordScanStart(settings, filters, isFilteredScan, isCallbackScan, scannerId);
         }
 
         mScanManager.startScan(scanClient);
@@ -2033,7 +2038,8 @@ public class GattService extends ProfileService {
         if (scanStats != null) {
             scanClient.stats = scanStats;
             boolean isFilteredScan = (piInfo.filters != null) && !piInfo.filters.isEmpty();
-            scanStats.recordScanStart(piInfo.settings, isFilteredScan, scannerId);
+            scanStats.recordScanStart(
+                    piInfo.settings, piInfo.filters, isFilteredScan, false, scannerId);
         }
 
         mScanManager.startScan(scanClient);
@@ -2046,7 +2052,7 @@ public class GattService extends ProfileService {
         mScanManager.flushBatchScanResults(new ScanClient(scannerId));
     }
 
-    void stopScan(int scannerId) {
+    void stopScan(ScanClient client) {
         enforceAdminPermission();
         int scanQueueSize =
                 mScanManager.getBatchScanQueue().size() + mScanManager.getRegularScanQueue().size();
@@ -2055,12 +2061,12 @@ public class GattService extends ProfileService {
         }
 
         AppScanStats app = null;
-        app = mScannerMap.getAppScanStatsById(scannerId);
+        app = mScannerMap.getAppScanStatsById(client.scannerId);
         if (app != null) {
-            app.recordScanStop(scannerId);
+            app.recordScanStop(client.scannerId);
         }
 
-        mScanManager.stopScan(scannerId);
+        mScanManager.stopScan(client);
     }
 
     void stopScan(PendingIntent intent, String callingPackage) {
@@ -2073,7 +2079,7 @@ public class GattService extends ProfileService {
         }
         if (app != null) {
             final int scannerId = app.id;
-            stopScan(scannerId);
+            stopScan(new ScanClient(scannerId));
             // Also unregister the scanner
             unregisterScanner(scannerId);
         }
@@ -3169,6 +3175,22 @@ public class GattService extends ProfileService {
         return uuids;
     }
 
+    void dumpRegisterId(StringBuilder sb) {
+        sb.append("  Scanner:\n");
+        for (Integer appId : mScannerMap.getAllAppsIds()) {
+            println(sb, "    app_if: " + appId + ", appName: " + mScannerMap.getById(appId).name);
+        }
+        sb.append("  Client:\n");
+        for (Integer appId : mClientMap.getAllAppsIds()) {
+            println(sb, "    app_if: " + appId + ", appName: " + mClientMap.getById(appId).name);
+        }
+        sb.append("  Server:\n");
+        for (Integer appId : mServerMap.getAllAppsIds()) {
+            println(sb, "    app_if: " + appId + ", appName: " + mServerMap.getById(appId).name);
+        }
+        sb.append("\n\n");
+    }
+
     @Override
     public void dump(StringBuilder sb) {
         super.dump(sb);
@@ -3179,7 +3201,10 @@ public class GattService extends ProfileService {
 
         println(sb, "mMaxScanFilters: " + mMaxScanFilters);
 
-        sb.append("\nGATT Scanner Map\n");
+        sb.append("\nRegistered App\n");
+        dumpRegisterId(sb);
+
+        sb.append("GATT Scanner Map\n");
         mScannerMap.dump(sb);
 
         sb.append("GATT Client Map\n");

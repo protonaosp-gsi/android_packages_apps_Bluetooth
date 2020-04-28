@@ -974,7 +974,7 @@ public class BluetoothMapObexServer extends ServerRequestHandler {
 
         }
         if (mProviderClient != null) {
-            mProviderClient.close();
+            mProviderClient.release();
             mProviderClient = null;
         }
 

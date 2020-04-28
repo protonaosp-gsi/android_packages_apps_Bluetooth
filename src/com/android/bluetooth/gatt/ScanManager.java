@@ -223,11 +223,7 @@ public class ScanManager {
         sendMessage(MSG_START_BLE_SCAN, client);
     }
 
-    void stopScan(int scannerId) {
-        ScanClient client = mScanNative.getBatchScanClient(scannerId);
-        if (client == null) {
-            client = mScanNative.getRegularScanClient(scannerId);
-        }
+    void stopScan(ScanClient client) {
         sendMessage(MSG_STOP_BLE_SCAN, client);
     }
 

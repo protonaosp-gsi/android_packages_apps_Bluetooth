@@ -24,14 +24,12 @@ import androidx.room.RoomDatabase;
 import androidx.room.migration.Migration;
 import androidx.sqlite.db.SupportSQLiteDatabase;
 
-import com.android.internal.annotations.VisibleForTesting;
-
 import java.util.List;
 
 /**
  * MetadataDatabase is a Room database stores Bluetooth persistence data
  */
-@Database(entities = {Metadata.class}, version = 102)
+@Database(entities = {Metadata.class}, exportSchema = false, version = 102)
 public abstract class MetadataDatabase extends RoomDatabase {
     /**
      * The database file name
@@ -102,16 +100,14 @@ public abstract class MetadataDatabase extends RoomDatabase {
         mMetadataDao().deleteAll();
     }
 
-    @VisibleForTesting
-    static final Migration MIGRATION_100_101 = new Migration(100, 101) {
+    private static final Migration MIGRATION_100_101 = new Migration(100, 101) {
         @Override
         public void migrate(SupportSQLiteDatabase database) {
             database.execSQL("ALTER TABLE metadata ADD COLUMN `pbap_client_priority` INTEGER");
         }
     };
 
-    @VisibleForTesting
-    static final Migration MIGRATION_101_102 = new Migration(101, 102) {
+    private static final Migration MIGRATION_101_102 = new Migration(101, 102) {
         @Override
         public void migrate(SupportSQLiteDatabase database) {
             database.execSQL("CREATE TABLE IF NOT EXISTS `metadata_tmp` ("

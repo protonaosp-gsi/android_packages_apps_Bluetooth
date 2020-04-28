@@ -223,7 +223,6 @@ class AvrcpControllerStateMachine extends StateMachine {
         mService.sBrowseTree.mRootNode.addChild(mBrowseTree.mRootNode);
         BluetoothMediaBrowserService.notifyChanged(mService
                 .sBrowseTree.mRootNode);
-        BluetoothMediaBrowserService.notifyChanged(mAddressedPlayer.getPlaybackState());
         mBrowsingConnected = true;
     }
 
@@ -233,12 +232,10 @@ class AvrcpControllerStateMachine extends StateMachine {
         mAddressedPlayer.updateCurrentTrack(null);
         mBrowseTree.mNowPlayingNode.setCached(false);
         BluetoothMediaBrowserService.notifyChanged(mBrowseTree.mNowPlayingNode);
-        BluetoothMediaBrowserService.addressedPlayerChanged(null);
         mService.sBrowseTree.mRootNode.removeChild(
                 mBrowseTree.mRootNode);
         BluetoothMediaBrowserService.notifyChanged(mService
                 .sBrowseTree.mRootNode);
-        BluetoothMediaBrowserService.trackChanged(null);
         mBrowsingConnected = false;
     }
 
@@ -299,8 +296,9 @@ class AvrcpControllerStateMachine extends StateMachine {
         @Override
         public void enter() {
             if (mMostRecentState == BluetoothProfile.STATE_CONNECTING) {
-                broadcastConnectionStateChanged(BluetoothProfile.STATE_CONNECTED);
                 BluetoothMediaBrowserService.addressedPlayerChanged(mSessionCallbacks);
+                BluetoothMediaBrowserService.notifyChanged(mAddressedPlayer.getPlaybackState());
+                broadcastConnectionStateChanged(BluetoothProfile.STATE_CONNECTED);
             } else {
                 logD("ReEnteringConnected");
             }
@@ -712,6 +710,8 @@ class AvrcpControllerStateMachine extends StateMachine {
         @Override
         public void enter() {
             onBrowsingDisconnected();
+            BluetoothMediaBrowserService.trackChanged(null);
+            BluetoothMediaBrowserService.addressedPlayerChanged(null);
             broadcastConnectionStateChanged(BluetoothProfile.STATE_DISCONNECTING);
             transitionTo(mDisconnected);
         }
@@ -881,7 +881,6 @@ class AvrcpControllerStateMachine extends StateMachine {
 
     private boolean shouldRequestFocus() {
         return mService.getResources()
-                .getBoolean(R.bool.a2dp_sink_automatically_request_audio_focus)
-                || !mAudioManager.isMusicActive();
+                .getBoolean(R.bool.a2dp_sink_automatically_request_audio_focus);
     }
 }

@@ -185,7 +185,7 @@ public class BluetoothMapAccountLoader {
             return children;
         } finally {
             if (mProviderClient != null) {
-                mProviderClient.close();
+                mProviderClient.release();
             }
         }
 

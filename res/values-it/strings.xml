@@ -100,7 +100,7 @@
     <string name="status_connection_error" msgid="947681831523219891">"Connessione non riuscita."</string>
     <string name="status_protocol_error" msgid="3245444473429269539">"Impossibile gestire correttamente la richiesta."</string>
     <string name="status_unknown_error" msgid="8156660554237824912">"Errore sconosciuto."</string>
-    <string name="btopp_live_folder" msgid="7967791481444474554">"Ricezione Bluetooth avvenuta"</string>
+    <string name="btopp_live_folder" msgid="7967791481444474554">"Ricevuti tramite Bluetooth"</string>
     <string name="opp_notification_group" msgid="3486303082135789982">"Condivisione Bluetooth"</string>
     <string name="download_success" msgid="7036160438766730871">"Ricezione completata (<xliff:g id="FILE_SIZE">%1$s</xliff:g>)"</string>
     <string name="upload_success" msgid="4014469387779648949">"Invio completato (<xliff:g id="FILE_SIZE">%1$s</xliff:g>)"</string>
@@ -134,4 +134,5 @@
     <string name="bluetooth_disconnected" msgid="3318303728981478873">"Audio Bluetooth disconnesso"</string>
     <string name="a2dp_sink_mbs_label" msgid="7566075853395412558">"Audio Bluetooth"</string>
     <string name="bluetooth_opp_file_limit_exceeded" msgid="8894450394309084519">"Impossibile trasferire file con dimensioni superiori a 4 GB"</string>
+    <string name="bluetooth_connect_action" msgid="4009848433321657090">"Connettiti a Bluetooth"</string>
 </resources>

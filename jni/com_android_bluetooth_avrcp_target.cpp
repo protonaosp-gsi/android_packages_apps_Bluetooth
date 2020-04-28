@@ -23,6 +23,7 @@
 #include <shared_mutex>
 #include <vector>
 
+#include "android_runtime/AndroidRuntime.h"
 #include "avrcp.h"
 #include "com_android_bluetooth.h"
 #include "utils/Log.h"
@@ -784,18 +785,10 @@ static void volumeDeviceDisconnected(const RawAddress& address) {
                                j_bdaddr);
 }
 
-static void sendVolumeChangedNative(JNIEnv* env, jobject object,
-                                    jstring address, jint volume) {
-  const char* tmp_addr = env->GetStringUTFChars(address, 0);
-  RawAddress bdaddr;
-  bool success = RawAddress::FromString(tmp_addr, bdaddr);
-  env->ReleaseStringUTFChars(address, tmp_addr);
-
-  if (!success) return;
-
+static void sendVolumeChangedNative(JNIEnv* env, jobject object, jint volume) {
   ALOGD("%s", __func__);
-  if (volumeCallbackMap.find(bdaddr) != volumeCallbackMap.end()) {
-    volumeCallbackMap.find(bdaddr)->second.Run(volume & 0x7F);
+  for (const auto& cb : volumeCallbackMap) {
+    cb.second.Run(volume & 0x7F);
   }
 }
 
@@ -822,8 +815,7 @@ static JNINativeMethod sMethods[] = {
      (void*)connectDeviceNative},
     {"disconnectDeviceNative", "(Ljava/lang/String;)Z",
      (void*)disconnectDeviceNative},
-    {"sendVolumeChangedNative", "(Ljava/lang/String;I)V",
-     (void*)sendVolumeChangedNative},
+    {"sendVolumeChangedNative", "(I)V", (void*)sendVolumeChangedNative},
 };
 
 int register_com_android_bluetooth_avrcp_target(JNIEnv* env) {

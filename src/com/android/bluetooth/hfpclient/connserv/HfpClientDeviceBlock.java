@@ -87,7 +87,7 @@ public class HfpClientDeviceBlock {
         }
     }
 
-    synchronized HfpClientConnection onCreateIncomingConnection(BluetoothHeadsetClientCall call) {
+    synchronized Connection onCreateIncomingConnection(BluetoothHeadsetClientCall call) {
         HfpClientConnection connection = mConnections.get(call.getUUID());
         if (connection != null) {
             connection.onAdded();
@@ -98,7 +98,7 @@ public class HfpClientDeviceBlock {
         }
     }
 
-    HfpClientConnection onCreateOutgoingConnection(Uri address) {
+    Connection onCreateOutgoingConnection(Uri address) {
         HfpClientConnection connection = buildConnection(null, address);
         if (connection != null) {
             connection.onAdded();
@@ -106,7 +106,7 @@ public class HfpClientDeviceBlock {
         return connection;
     }
 
-    synchronized HfpClientConnection onCreateUnknownConnection(BluetoothHeadsetClientCall call) {
+    synchronized Connection onCreateUnknownConnection(BluetoothHeadsetClientCall call) {
         Uri number = Uri.fromParts(PhoneAccount.SCHEME_TEL, call.getNumber(), null);
         HfpClientConnection connection = mConnections.get(call.getUUID());
 
@@ -224,7 +224,7 @@ public class HfpClientDeviceBlock {
         if (DBG) {
             Log.d(mTAG, "prevConn " + prevConn.isClosing() + " new call " + newCall.getState());
         }
-        if (prevConn.isClosing()
+        if (prevConn.isClosing() && prevConn.getCall().getState() != newCall.getState()
                 && newCall.getState() != BluetoothHeadsetClientCall.CALL_STATE_TERMINATED) {
             return true;
         }
