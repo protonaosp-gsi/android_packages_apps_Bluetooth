@@ -69,6 +69,7 @@ import android.os.SystemClock;
 import android.os.SystemProperties;
 import android.os.UserHandle;
 import android.os.UserManager;
+import android.provider.DeviceConfig;
 import android.provider.Settings;
 import android.text.TextUtils;
 import android.util.Base64;
@@ -81,6 +82,7 @@ import com.android.bluetooth.Utils;
 import com.android.bluetooth.a2dp.A2dpService;
 import com.android.bluetooth.a2dpsink.A2dpSinkService;
 import com.android.bluetooth.btservice.RemoteDevices.DeviceProperties;
+import com.android.bluetooth.btservice.bluetoothkeystore.BluetoothKeystoreService;
 import com.android.bluetooth.btservice.storage.DatabaseManager;
 import com.android.bluetooth.btservice.storage.MetadataDatabase;
 import com.android.bluetooth.gatt.GattService;
@@ -224,6 +226,7 @@ public class AdapterService extends Service {
 
     private BluetoothSocketManagerBinder mBluetoothSocketManagerBinder;
 
+    private BluetoothKeystoreService mBluetoothKeystoreService;
     private A2dpService mA2dpService;
     private A2dpSinkService mA2dpSinkService;
     private HeadsetService mHeadsetService;
@@ -434,7 +437,10 @@ public class AdapterService extends Service {
         mAdapterProperties = new AdapterProperties(this);
         mAdapterStateMachine = AdapterState.make(this);
         mJniCallbacks = new JniCallbacks(this, mAdapterProperties);
-        initNative(isGuest(), isNiapMode());
+        mBluetoothKeystoreService = new BluetoothKeystoreService(isNiapMode());
+        mBluetoothKeystoreService.start();
+        int configCompareResult = mBluetoothKeystoreService.getCompareResult();
+        initNative(isGuest(), isNiapMode(), configCompareResult, getInitFlags());
         mNativeAvailable = true;
         mCallbacks = new RemoteCallbackList<IBluetoothCallback>();
         mAppOps = getSystemService(AppOpsManager.class);
@@ -447,6 +453,8 @@ public class AdapterService extends Service {
         mUserManager = (UserManager) getSystemService(Context.USER_SERVICE);
         mBatteryStats = IBatteryStats.Stub.asInterface(
                 ServiceManager.getService(BatteryStats.SERVICE_NAME));
+
+        mBluetoothKeystoreService.initJni();
 
         mSdpManager = SdpManager.init(this);
         registerReceiver(mAlarmBroadcastReceiver, new IntentFilter(ACTION_ALARM_WAKEUP));
@@ -735,6 +743,10 @@ public class AdapterService extends Service {
         if (mSdpManager != null) {
             mSdpManager.cleanup();
             mSdpManager = null;
+        }
+
+        if (mBluetoothKeystoreService != null) {
+            mBluetoothKeystoreService.cleanup();
         }
 
         if (mNativeAvailable) {
@@ -1879,10 +1891,14 @@ public class AdapterService extends Service {
 
             enforceBluetoothPrivilegedPermission(service);
 
-            service.disable();
             if (service.mDatabaseManager != null) {
                 service.mDatabaseManager.factoryReset();
             }
+
+            if (service.mBluetoothKeystoreService != null) {
+                service.mBluetoothKeystoreService.factoryReset();
+            }
+
             return service.factoryResetNative();
         }
 
@@ -2596,15 +2612,15 @@ public class AdapterService extends Service {
         editor.apply();
     }
 
-    void setPhonebookAccessPermission(BluetoothDevice device, int value) {
+    public void setPhonebookAccessPermission(BluetoothDevice device, int value) {
         setDeviceAccessFromPrefs(device, value, PHONEBOOK_ACCESS_PERMISSION_PREFERENCE_FILE);
     }
 
-    void setMessageAccessPermission(BluetoothDevice device, int value) {
+    public void setMessageAccessPermission(BluetoothDevice device, int value) {
         setDeviceAccessFromPrefs(device, value, MESSAGE_ACCESS_PERMISSION_PREFERENCE_FILE);
     }
 
-    void setSimAccessPermission(BluetoothDevice device, int value) {
+    public void setSimAccessPermission(BluetoothDevice device, int value) {
         setDeviceAccessFromPrefs(device, value, SIM_ACCESS_PERMISSION_PREFERENCE_FILE);
     }
 
@@ -2993,6 +3009,15 @@ public class AdapterService extends Service {
         return Settings.Global.getInt(getContentResolver(), "niap_mode", 0) == 1;
     }
 
+    private static final String GD_CORE_FLAG = "INIT_gd_core";
+    private String[] getInitFlags() {
+        ArrayList<String> initFlags = new ArrayList<>();
+        if (DeviceConfig.getBoolean(DeviceConfig.NAMESPACE_BLUETOOTH, GD_CORE_FLAG, false)) {
+            initFlags.add(GD_CORE_FLAG);
+        }
+        return initFlags.toArray(new String[0]);
+    }
+
     /**
      *  Obfuscate Bluetooth MAC address into a PII free ID string
      *
@@ -3022,7 +3047,8 @@ public class AdapterService extends Service {
 
     static native void classInitNative();
 
-    native boolean initNative(boolean startRestricted, boolean isNiapMode);
+    native boolean initNative(boolean startRestricted, boolean isNiapMode, int configCompareResult,
+            String[] initFlags);
 
     native void cleanupNative();
 
@@ -3051,13 +3077,13 @@ public class AdapterService extends Service {
     native boolean getDevicePropertyNative(byte[] address, int type);
 
     /*package*/
-    native boolean createBondNative(byte[] address, int transport);
+    public native boolean createBondNative(byte[] address, int transport);
 
     /*package*/
     native boolean createBondOutOfBandNative(byte[] address, int transport, OobData oobData);
 
     /*package*/
-    native boolean removeBondNative(byte[] address);
+    public native boolean removeBondNative(byte[] address);
 
     /*package*/
     native boolean cancelBondNative(byte[] address);
