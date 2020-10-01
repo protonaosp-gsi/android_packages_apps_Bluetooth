@@ -31,6 +31,7 @@ import android.app.AlarmManager;
 import android.app.AppOpsManager;
 import android.app.PendingIntent;
 import android.app.Service;
+import android.app.admin.DevicePolicyManager;
 import android.bluetooth.BluetoothActivityEnergyInfo;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothAdapter.ActiveDeviceUse;
@@ -483,6 +484,8 @@ public class AdapterService extends Service {
 
         setAdapterService(this);
 
+        invalidateBluetoothCaches();
+
         // First call to getSharedPreferences will result in a file read into
         // memory cache. Call it here asynchronously to avoid potential ANR
         // in the future
@@ -654,8 +657,13 @@ public class AdapterService extends Service {
         setProfileServiceState(GattService.class, BluetoothAdapter.STATE_OFF);
     }
 
+    private void invalidateBluetoothGetStateCache() {
+        BluetoothAdapter.invalidateBluetoothGetStateCache();
+    }
+
     void updateAdapterState(int prevState, int newState) {
         mAdapterProperties.setState(newState);
+        invalidateBluetoothGetStateCache();
         if (mCallbacks != null) {
             int n = mCallbacks.beginBroadcast();
             debugLog("updateAdapterState() - Broadcasting state " + BluetoothAdapter.nameForState(
@@ -705,6 +713,7 @@ public class AdapterService extends Service {
         clearAdapterService(this);
 
         mCleaningUp = true;
+        invalidateBluetoothCaches();
 
         unregisterReceiver(mAlarmBroadcastReceiver);
 
@@ -792,6 +801,13 @@ public class AdapterService extends Service {
         if (mCallbacks != null) {
             mCallbacks.kill();
         }
+    }
+
+    private void invalidateBluetoothCaches() {
+        BluetoothAdapter.invalidateGetProfileConnectionStateCache();
+        BluetoothAdapter.invalidateIsOffloadedFilteringSupportedCache();
+        BluetoothDevice.invalidateBluetoothGetBondStateCache();
+        BluetoothAdapter.invalidateBluetoothGetStateCache();
     }
 
     private void setProfileServiceState(Class service, int state) {
@@ -1064,6 +1080,8 @@ public class AdapterService extends Service {
 
         AdapterServiceBinder(AdapterService svc) {
             mService = svc;
+            mService.invalidateBluetoothGetStateCache();
+            BluetoothAdapter.getDefaultAdapter().disableBluetoothGetStateCache();
         }
 
         public void cleanup() {
@@ -1387,6 +1405,10 @@ public class AdapterService extends Service {
             return service.mAdapterProperties.getConnectionState();
         }
 
+        /**
+         * This method has an associated binder cache.  The invalidation
+         * methods must be changed if the logic behind this method changes.
+         */
         @Override
         public int getProfileConnectionState(int profile) {
             AdapterService service = getService();
@@ -1435,7 +1457,7 @@ public class AdapterService extends Service {
                 return false;
             }
 
-            enforceBluetoothPrivilegedPermission(service);
+            enforceBluetoothAdminPermission(service);
 
             DeviceProperties deviceProp = service.mRemoteDevices.getDeviceProperties(device);
             if (deviceProp == null || deviceProp.getBondState() != BluetoothDevice.BOND_BONDED) {
@@ -1905,9 +1927,11 @@ public class AdapterService extends Service {
         @Override
         public void registerCallback(IBluetoothCallback callback) {
             AdapterService service = getService();
-            if (service == null) {
+            if (service == null || !callerIsSystemOrActiveUser(TAG, "registerCallback")) {
                 return;
             }
+
+            enforceBluetoothPrivilegedPermission(service);
 
             service.mCallbacks.register(callback);
         }
@@ -1915,9 +1939,12 @@ public class AdapterService extends Service {
         @Override
         public void unregisterCallback(IBluetoothCallback callback) {
             AdapterService service = getService();
-            if (service == null || service.mCallbacks == null) {
+            if (service == null || service.mCallbacks == null
+                    || !callerIsSystemOrActiveUser(TAG, "unregisterCallback")) {
                 return;
             }
+
+            enforceBluetoothPrivilegedPermission(service);
 
             service.mCallbacks.unregister(callback);
         }
@@ -1935,6 +1962,10 @@ public class AdapterService extends Service {
             return val >= MIN_ADVT_INSTANCES_FOR_MA;
         }
 
+        /**
+         * This method has an associated binder cache.  The invalidation
+         * methods must be changed if the logic behind this method changes.
+         */
         @Override
         public boolean isOffloadedFilteringSupported() {
             AdapterService service = getService();
@@ -2049,9 +2080,11 @@ public class AdapterService extends Service {
         public boolean registerMetadataListener(IBluetoothMetadataListener listener,
                 BluetoothDevice device) {
             AdapterService service = getService();
-            if (service == null) {
+            if (service == null || !callerIsSystemOrActiveUser(TAG, "registerMetadataListener")) {
                 return false;
             }
+
+            enforceBluetoothPrivilegedPermission(service);
 
             if (service.mMetadataListeners == null) {
                 return false;
@@ -2071,9 +2104,12 @@ public class AdapterService extends Service {
         @Override
         public boolean unregisterMetadataListener(BluetoothDevice device) {
             AdapterService service = getService();
-            if (service == null) {
+            if (service == null
+                    || !callerIsSystemOrActiveUser(TAG, "unregisterMetadataListener")) {
                 return false;
             }
+
+            enforceBluetoothPrivilegedPermission(service);
 
             if (service.mMetadataListeners == null) {
                 return false;
@@ -2087,9 +2123,11 @@ public class AdapterService extends Service {
         @Override
         public boolean setMetadata(BluetoothDevice device, int key, byte[] value) {
             AdapterService service = getService();
-            if (service == null) {
+            if (service == null || !callerIsSystemOrActiveUser(TAG, "setMetadata")) {
                 return false;
             }
+
+            enforceBluetoothPrivilegedPermission(service);
 
             if (value.length > BluetoothDevice.METADATA_MAX_LENGTH) {
                 return false;
@@ -2100,9 +2138,11 @@ public class AdapterService extends Service {
         @Override
         public byte[] getMetadata(BluetoothDevice device, int key) {
             AdapterService service = getService();
-            if (service == null) {
+            if (service == null || !callerIsSystemOrActiveUser(TAG, "getMetadata")) {
                 return null;
             }
+
+            enforceBluetoothPrivilegedPermission(service);
 
             return service.mDatabaseManager.getCustomMeta(device, key);
         }
@@ -2117,9 +2157,11 @@ public class AdapterService extends Service {
         @Override
         public void onLeServiceUp() {
             AdapterService service = getService();
-            if (service == null) {
+            if (service == null || !callerIsSystemOrActiveUser(TAG, "onLeServiceUp")) {
                 return;
             }
+
+            enforceBluetoothPrivilegedPermission(service);
 
             service.mAdapterStateMachine.sendMessage(AdapterState.USER_TURN_ON);
         }
@@ -2127,9 +2169,11 @@ public class AdapterService extends Service {
         @Override
         public void onBrEdrDown() {
             AdapterService service = getService();
-            if (service == null) {
+            if (service == null || !callerIsSystemOrActiveUser(TAG, "onBrEdrDown")) {
                 return;
             }
+
+            enforceBluetoothPrivilegedPermission(service);
 
             service.mAdapterStateMachine.sendMessage(AdapterState.BLE_TURN_OFF);
         }
@@ -2148,8 +2192,6 @@ public class AdapterService extends Service {
             writer.close();
         }
     }
-
-    ;
 
     // ----API Methods--------
 
@@ -3006,14 +3048,31 @@ public class AdapterService extends Service {
     }
 
     private boolean isNiapMode() {
-        return Settings.Global.getInt(getContentResolver(), "niap_mode", 0) == 1;
+        return ((DevicePolicyManager) getSystemService(Context.DEVICE_POLICY_SERVICE))
+                .isCommonCriteriaModeEnabled(null);
     }
 
     private static final String GD_CORE_FLAG = "INIT_gd_core";
+    private static final String GD_ADVERTISING_FLAG = "INIT_gd_advertising";
+    private static final String GD_HCI_FLAG = "INIT_gd_hci";
+    private static final String GD_CONTROLLER_FLAG = "INIT_gd_controller";
+    private static final String GD_ACL_FLAG = "INIT_gd_acl";
     private String[] getInitFlags() {
         ArrayList<String> initFlags = new ArrayList<>();
         if (DeviceConfig.getBoolean(DeviceConfig.NAMESPACE_BLUETOOTH, GD_CORE_FLAG, false)) {
             initFlags.add(GD_CORE_FLAG);
+        }
+        if (DeviceConfig.getBoolean(DeviceConfig.NAMESPACE_BLUETOOTH, GD_ADVERTISING_FLAG, false)) {
+            initFlags.add(GD_ADVERTISING_FLAG);
+        }
+        if (DeviceConfig.getBoolean(DeviceConfig.NAMESPACE_BLUETOOTH, GD_HCI_FLAG, false)) {
+            initFlags.add(GD_HCI_FLAG);
+        }
+        if (DeviceConfig.getBoolean(DeviceConfig.NAMESPACE_BLUETOOTH, GD_CONTROLLER_FLAG, false)) {
+            initFlags.add(GD_CONTROLLER_FLAG);
+        }
+        if (DeviceConfig.getBoolean(DeviceConfig.NAMESPACE_BLUETOOTH, GD_ACL_FLAG, false)) {
+            initFlags.add(GD_ACL_FLAG);
         }
         return initFlags.toArray(new String[0]);
     }
