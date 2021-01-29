@@ -14,6 +14,7 @@ android_test {
     ],
 
     static_libs: [
+        "androidx.test.ext.truth",
         "androidx.test.rules",
         "mockito-target",
         "androidx.test.espresso.intents",
@@ -21,6 +22,7 @@ android_test {
         "androidx.room_room-migration",
         "androidx.room_room-runtime",
         "androidx.room_room-testing",
+        "truth-prebuilt",
     ],
 
     asset_dirs: ["src/com/android/bluetooth/btservice/storage/schemas"],

@@ -32,6 +32,7 @@ import android.app.AppOpsManager;
 import android.app.PendingIntent;
 import android.app.Service;
 import android.app.admin.DevicePolicyManager;
+import android.bluetooth.BluetoothA2dp;
 import android.bluetooth.BluetoothActivityEnergyInfo;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothAdapter.ActiveDeviceUse;
@@ -40,8 +41,10 @@ import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothProfile;
 import android.bluetooth.BluetoothProtoEnums;
 import android.bluetooth.BluetoothUuid;
+import android.bluetooth.BufferConstraints;
 import android.bluetooth.IBluetooth;
 import android.bluetooth.IBluetoothCallback;
+import android.bluetooth.IBluetoothConnectionCallback;
 import android.bluetooth.IBluetoothMetadataListener;
 import android.bluetooth.IBluetoothSocketManager;
 import android.bluetooth.OobData;
@@ -83,6 +86,7 @@ import com.android.bluetooth.Utils;
 import com.android.bluetooth.a2dp.A2dpService;
 import com.android.bluetooth.a2dpsink.A2dpSinkService;
 import com.android.bluetooth.btservice.RemoteDevices.DeviceProperties;
+import com.android.bluetooth.btservice.activityattribution.ActivityAttributionService;
 import com.android.bluetooth.btservice.bluetoothkeystore.BluetoothKeystoreService;
 import com.android.bluetooth.btservice.storage.DatabaseManager;
 import com.android.bluetooth.btservice.storage.MetadataDatabase;
@@ -113,7 +117,9 @@ import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 public class AdapterService extends Service {
     private static final String TAG = "BluetoothAdapterService";
@@ -206,6 +212,7 @@ public class AdapterService extends Service {
     private final HashMap<BluetoothDevice, ArrayList<IBluetoothMetadataListener>>
             mMetadataListeners = new HashMap<>();
     private final HashMap<String, Integer> mProfileServicesState = new HashMap<String, Integer>();
+    private Set<IBluetoothConnectionCallback> mBluetoothConnectionCallbacks = new HashSet<>();
     //Only BluetoothManagerService should be registered
     private RemoteCallbackList<IBluetoothCallback> mCallbacks;
     private int mCurrentRequestId;
@@ -230,6 +237,7 @@ public class AdapterService extends Service {
     private BluetoothKeystoreService mBluetoothKeystoreService;
     private A2dpService mA2dpService;
     private A2dpSinkService mA2dpSinkService;
+    private ActivityAttributionService mActivityAttributionService;
     private HeadsetService mHeadsetService;
     private HeadsetClientService mHeadsetClientService;
     private BluetoothMapService mMapService;
@@ -440,8 +448,14 @@ public class AdapterService extends Service {
         mJniCallbacks = new JniCallbacks(this, mAdapterProperties);
         mBluetoothKeystoreService = new BluetoothKeystoreService(isNiapMode());
         mBluetoothKeystoreService.start();
+        mActivityAttributionService = new ActivityAttributionService();
+        mActivityAttributionService.start();
         int configCompareResult = mBluetoothKeystoreService.getCompareResult();
-        initNative(isGuest(), isNiapMode(), configCompareResult, getInitFlags());
+
+        // Android TV doesn't show consent dialogs for just works and encryption only le pairing
+        boolean isAtvDevice = getApplicationContext().getPackageManager().hasSystemFeature(
+                PackageManager.FEATURE_LEANBACK_ONLY);
+        initNative(isGuest(), isNiapMode(), configCompareResult, getInitFlags(), isAtvDevice);
         mNativeAvailable = true;
         mCallbacks = new RemoteCallbackList<IBluetoothCallback>();
         mAppOps = getSystemService(AppOpsManager.class);
@@ -756,6 +770,10 @@ public class AdapterService extends Service {
 
         if (mBluetoothKeystoreService != null) {
             mBluetoothKeystoreService.cleanup();
+        }
+
+        if (mActivityAttributionService != null) {
+            mActivityAttributionService.cleanup();
         }
 
         if (mNativeAvailable) {
@@ -1925,6 +1943,30 @@ public class AdapterService extends Service {
         }
 
         @Override
+        public boolean registerBluetoothConnectionCallback(IBluetoothConnectionCallback callback) {
+            AdapterService service = getService();
+            if (service == null || !callerIsSystemOrActiveUser(TAG,
+                    "registerBluetoothConnectionCallback")) {
+                return false;
+            }
+            enforceBluetoothPrivilegedPermission(service);
+            service.mBluetoothConnectionCallbacks.add(callback);
+            return true;
+        }
+
+        @Override
+        public boolean unregisterBluetoothConnectionCallback(
+                IBluetoothConnectionCallback callback) {
+            AdapterService service = getService();
+            if (service == null || !callerIsSystemOrActiveUser(TAG,
+                    "unregisterBluetoothConnectionCallback")) {
+                return false;
+            }
+            enforceBluetoothPrivilegedPermission(service);
+            return service.mBluetoothConnectionCallbacks.remove(callback);
+        }
+
+        @Override
         public void registerCallback(IBluetoothCallback callback) {
             AdapterService service = getService();
             if (service == null || !callerIsSystemOrActiveUser(TAG, "registerCallback")) {
@@ -2625,6 +2667,10 @@ public class AdapterService extends Service {
         return deviceProp.getUuids();
     }
 
+    public Set<IBluetoothConnectionCallback> getBluetoothConnectionCallbacks() {
+        return mBluetoothConnectionCallbacks;
+    }
+
     void logUserBondResponse(BluetoothDevice device, boolean accepted, int event) {
         BluetoothStatsLog.write(BluetoothStatsLog.BLUETOOTH_BOND_STATE_CHANGED,
                 obfuscateAddress(device), 0, device.getType(),
@@ -2815,7 +2861,8 @@ public class AdapterService extends Service {
 
             Intent intent = new Intent(ACTION_ALARM_WAKEUP);
             mPendingAlarm =
-                    PendingIntent.getBroadcast(this, 0, intent, PendingIntent.FLAG_ONE_SHOT);
+                    PendingIntent.getBroadcast(this, 0, intent, PendingIntent.FLAG_ONE_SHOT
+                            | PendingIntent.FLAG_IMMUTABLE);
             mAlarmManager.setExact(type, wakeupTime, mPendingAlarm);
             return true;
         }
@@ -3052,27 +3099,85 @@ public class AdapterService extends Service {
                 .isCommonCriteriaModeEnabled(null);
     }
 
+    // Boolean flags
     private static final String GD_CORE_FLAG = "INIT_gd_core";
     private static final String GD_ADVERTISING_FLAG = "INIT_gd_advertising";
+    private static final String GD_SCANNING_FLAG = "INIT_gd_scanning";
     private static final String GD_HCI_FLAG = "INIT_gd_hci";
     private static final String GD_CONTROLLER_FLAG = "INIT_gd_controller";
     private static final String GD_ACL_FLAG = "INIT_gd_acl";
+    private static final String GD_L2CAP_FLAG = "INIT_gd_l2cap";
+    private static final String GD_RUST_FLAG = "INIT_gd_rust";
+    private static final String GD_LINK_POLICY_FLAG = "INIT_gd_link_policy";
+
+    /**
+     * Logging flags logic (only applies to DEBUG and VERBOSE levels):
+     * if LOG_TAG in LOGGING_DEBUG_DISABLED_FOR_TAGS_FLAG:
+     *   DO NOT LOG
+     * else if LOG_TAG in LOGGING_DEBUG_ENABLED_FOR_TAGS_FLAG:
+     *   DO LOG
+     * else if LOGGING_DEBUG_ENABLED_FOR_ALL_FLAG:
+     *   DO LOG
+     * else:
+     *   DO NOT LOG
+     */
+    private static final String LOGGING_DEBUG_ENABLED_FOR_ALL_FLAG =
+            "INIT_logging_debug_enabled_for_all";
+    // String flags
+    // Comma separated tags
+    private static final String LOGGING_DEBUG_ENABLED_FOR_TAGS_FLAG =
+            "INIT_logging_debug_enabled_for_tags";
+    private static final String LOGGING_DEBUG_DISABLED_FOR_TAGS_FLAG =
+            "INIT_logging_debug_disabled_for_tags";
+    private static final String BTAA_HCI_LOG_FLAG = "INIT_btaa_hci";
+
     private String[] getInitFlags() {
         ArrayList<String> initFlags = new ArrayList<>();
         if (DeviceConfig.getBoolean(DeviceConfig.NAMESPACE_BLUETOOTH, GD_CORE_FLAG, false)) {
-            initFlags.add(GD_CORE_FLAG);
+            initFlags.add(String.format("%s=%s", GD_CORE_FLAG, "true"));
         }
         if (DeviceConfig.getBoolean(DeviceConfig.NAMESPACE_BLUETOOTH, GD_ADVERTISING_FLAG, false)) {
-            initFlags.add(GD_ADVERTISING_FLAG);
+            initFlags.add(String.format("%s=%s", GD_ADVERTISING_FLAG, "true"));
+        }
+        if (DeviceConfig.getBoolean(DeviceConfig.NAMESPACE_BLUETOOTH, GD_SCANNING_FLAG, false)) {
+            initFlags.add(String.format("%s=%s", GD_SCANNING_FLAG, "true"));
         }
         if (DeviceConfig.getBoolean(DeviceConfig.NAMESPACE_BLUETOOTH, GD_HCI_FLAG, false)) {
-            initFlags.add(GD_HCI_FLAG);
+            initFlags.add(String.format("%s=%s", GD_HCI_FLAG, "true"));
         }
         if (DeviceConfig.getBoolean(DeviceConfig.NAMESPACE_BLUETOOTH, GD_CONTROLLER_FLAG, false)) {
-            initFlags.add(GD_CONTROLLER_FLAG);
+            initFlags.add(String.format("%s=%s", GD_CONTROLLER_FLAG, "true"));
         }
         if (DeviceConfig.getBoolean(DeviceConfig.NAMESPACE_BLUETOOTH, GD_ACL_FLAG, false)) {
-            initFlags.add(GD_ACL_FLAG);
+            initFlags.add(String.format("%s=%s", GD_ACL_FLAG, "true"));
+        }
+        if (DeviceConfig.getBoolean(DeviceConfig.NAMESPACE_BLUETOOTH, GD_L2CAP_FLAG, false)) {
+            initFlags.add(String.format("%s=%s", GD_L2CAP_FLAG, "true"));
+        }
+        if (DeviceConfig.getBoolean(DeviceConfig.NAMESPACE_BLUETOOTH, GD_RUST_FLAG, false)) {
+            initFlags.add(String.format("%s=%s", GD_RUST_FLAG, "true"));
+        }
+        if (DeviceConfig.getBoolean(DeviceConfig.NAMESPACE_BLUETOOTH, GD_LINK_POLICY_FLAG, false)) {
+            initFlags.add(String.format("%s=%s", GD_LINK_POLICY_FLAG, "true"));
+        }
+        if (DeviceConfig.getBoolean(DeviceConfig.NAMESPACE_BLUETOOTH,
+                LOGGING_DEBUG_ENABLED_FOR_ALL_FLAG, false)) {
+            initFlags.add(String.format("%s=%s", LOGGING_DEBUG_ENABLED_FOR_ALL_FLAG, "true"));
+        }
+        String debugLoggingEnabledTags = DeviceConfig.getString(DeviceConfig.NAMESPACE_BLUETOOTH,
+                LOGGING_DEBUG_ENABLED_FOR_TAGS_FLAG, "");
+        if (!debugLoggingEnabledTags.isEmpty()) {
+            initFlags.add(String.format("%s=%s", LOGGING_DEBUG_ENABLED_FOR_TAGS_FLAG,
+                    debugLoggingEnabledTags));
+        }
+        String debugLoggingDisabledTags = DeviceConfig.getString(DeviceConfig.NAMESPACE_BLUETOOTH,
+                LOGGING_DEBUG_DISABLED_FOR_TAGS_FLAG, "");
+        if (!debugLoggingDisabledTags.isEmpty()) {
+            initFlags.add(String.format("%s=%s", LOGGING_DEBUG_DISABLED_FOR_TAGS_FLAG,
+                    debugLoggingDisabledTags));
+        }
+        if (DeviceConfig.getBoolean(DeviceConfig.NAMESPACE_BLUETOOTH, BTAA_HCI_LOG_FLAG, false)) {
+            initFlags.add(BTAA_HCI_LOG_FLAG);
         }
         return initFlags.toArray(new String[0]);
     }
@@ -3092,6 +3197,38 @@ public class AdapterService extends Service {
     }
 
     /**
+     * Get dynamic audio buffer size supported type
+     *
+     * @return support <p>Possible values are
+     * {@link BluetoothA2dp#DYNAMIC_BUFFER_SUPPORT_NONE},
+     * {@link BluetoothA2dp#DYNAMIC_BUFFER_SUPPORT_A2DP_OFFLOAD},
+     * {@link BluetoothA2dp#DYNAMIC_BUFFER_SUPPORT_A2DP_SOFTWARE_ENCODING}.
+     */
+    public int getDynamicBufferSupport() {
+        return mAdapterProperties.getDynamicBufferSupport();
+    }
+
+    /**
+     * Get dynamic audio buffer size
+     *
+     * @return BufferConstraints
+     */
+    public BufferConstraints getBufferConstraints() {
+        return mAdapterProperties.getBufferConstraints();
+    }
+
+    /**
+     * Set dynamic audio buffer size
+     *
+     * @param codec Audio codec
+     * @param value buffer millis
+     * @return true if the settings is successful, false otherwise
+     */
+    public boolean setBufferMillis(int codec, int value) {
+        return mAdapterProperties.setBufferMillis(codec, value);
+    }
+
+    /**
      *  Get an incremental id of Bluetooth metrics and log
      *
      *  @param device Bluetooth device
@@ -3107,7 +3244,7 @@ public class AdapterService extends Service {
     static native void classInitNative();
 
     native boolean initNative(boolean startRestricted, boolean isNiapMode, int configCompareResult,
-            String[] initFlags);
+            String[] initFlags, boolean isAtvDevice);
 
     native void cleanupNative();
 
@@ -3183,6 +3320,8 @@ public class AdapterService extends Service {
     private native void interopDatabaseAddNative(int feature, byte[] address, int length);
 
     private native byte[] obfuscateAddressNative(byte[] address);
+
+    native boolean setBufferMillisNative(int codec, int value);
 
     private native int getMetricIdNative(byte[] address);
 
