@@ -390,7 +390,8 @@ class BluetoothOppNotification {
             intent.setClassName(Constants.THIS_PACKAGE_NAME, BluetoothOppReceiver.class.getName());
             intent.setDataAndNormalize(Uri.parse(BluetoothShare.CONTENT_URI + "/" + item.id));
 
-            b.setContentIntent(PendingIntent.getBroadcast(mContext, 0, intent, 0));
+            b.setContentIntent(PendingIntent.getBroadcast(mContext, 0, intent,
+                        PendingIntent.FLAG_IMMUTABLE));
             mNotificationMgr.notify(NOTIFICATION_ID_PROGRESS, b.build());
         }
     }
@@ -458,9 +459,11 @@ class BluetoothOppNotification {
                                                     .system_notification_accent_color,
                                             mContext.getTheme()))
                             .setContentIntent(
-                                    PendingIntent.getBroadcast(mContext, 0, contentIntent, 0))
+                                    PendingIntent.getBroadcast(mContext, 0, contentIntent,
+                                        PendingIntent.FLAG_IMMUTABLE))
                             .setDeleteIntent(
-                                    PendingIntent.getBroadcast(mContext, 0, deleteIntent, 0))
+                                    PendingIntent.getBroadcast(mContext, 0, deleteIntent,
+                                        PendingIntent.FLAG_IMMUTABLE))
                             .setWhen(timeStamp)
                             .setLocalOnly(true)
                             .build();
@@ -523,10 +526,13 @@ class BluetoothOppNotification {
                                             com.android.internal.R.color
                                                     .system_notification_accent_color,
                                             mContext.getTheme()))
+
                             .setContentIntent(
-                                    PendingIntent.getBroadcast(mContext, 0, contentIntent, 0))
+                                    PendingIntent.getBroadcast(mContext, 0, contentIntent,
+                                        PendingIntent.FLAG_IMMUTABLE))
                             .setDeleteIntent(
-                                    PendingIntent.getBroadcast(mContext, 0, deleteIntent, 0))
+                                    PendingIntent.getBroadcast(mContext, 0, deleteIntent,
+                                        PendingIntent.FLAG_IMMUTABLE))
                             .setWhen(timeStamp)
                             .setLocalOnly(true)
                             .build();
@@ -563,13 +569,14 @@ class BluetoothOppNotification {
                             mContext.getText(R.string.incoming_file_confirm_cancel),
                             PendingIntent.getBroadcast(mContext, 0,
                                     new Intent(baseIntent).setAction(Constants.ACTION_DECLINE),
-                                    0)).build();
+                                    PendingIntent.FLAG_IMMUTABLE)).build();
             Notification.Action actionAccept = new Notification.Action.Builder(
                     Icon.createWithResource(mContext,R.drawable.ic_accept),
                     mContext.getText(R.string.incoming_file_confirm_ok),
                     PendingIntent.getBroadcast(mContext, 0,
-                            new Intent(baseIntent).setAction(Constants.ACTION_ACCEPT), 0)).build();
-            Notification n =
+                            new Intent(baseIntent).setAction(Constants.ACTION_ACCEPT),
+                            PendingIntent.FLAG_IMMUTABLE)).build();
+            Notification public_n =
                     new Notification.Builder(mContext, OPP_NOTIFICATION_CHANNEL).setOnlyAlertOnce(
                             true)
                             .setOngoing(true)
@@ -578,9 +585,11 @@ class BluetoothOppNotification {
                             .addAction(actionAccept)
                             .setContentIntent(PendingIntent.getBroadcast(mContext, 0,
                                     new Intent(baseIntent).setAction(
-                                            Constants.ACTION_INCOMING_FILE_CONFIRM), 0))
+                                            Constants.ACTION_INCOMING_FILE_CONFIRM),
+                                    PendingIntent.FLAG_IMMUTABLE))
                             .setDeleteIntent(PendingIntent.getBroadcast(mContext, 0,
-                                    new Intent(baseIntent).setAction(Constants.ACTION_HIDE), 0))
+                                    new Intent(baseIntent).setAction(Constants.ACTION_HIDE),
+                                    PendingIntent.FLAG_IMMUTABLE))
                             .setColor(mContext.getResources()
                                     .getColor(
                                             com.android.internal.R.color
@@ -595,6 +604,35 @@ class BluetoothOppNotification {
                             .setSubText(Formatter.formatFileSize(mContext, info.mTotalBytes))
                             .setSmallIcon(R.drawable.bt_incomming_file_notification)
                             .setLocalOnly(true)
+                            .build();
+            Notification n =
+                    new Notification.Builder(mContext, OPP_NOTIFICATION_CHANNEL).setOnlyAlertOnce(
+                            true)
+                            .setOngoing(true)
+                            .setWhen(info.mTimeStamp)
+                            .setContentIntent(PendingIntent.getBroadcast(mContext, 0,
+                                    new Intent(baseIntent).setAction(
+                                            Constants.ACTION_INCOMING_FILE_CONFIRM),
+                                    PendingIntent.FLAG_IMMUTABLE))
+                            .setDeleteIntent(PendingIntent.getBroadcast(mContext, 0,
+                                    new Intent(baseIntent).setAction(Constants.ACTION_HIDE),
+                                    PendingIntent.FLAG_IMMUTABLE))
+                            .setColor(mContext.getResources()
+                                    .getColor(
+                                            com.android.internal.R.color
+                                                    .system_notification_accent_color,
+                                            mContext.getTheme()))
+                            .setContentTitle(mContext.getText(
+                                    R.string.incoming_file_confirm_Notification_title))
+                            .setContentText(info.mFileName)
+                            .setStyle(new Notification.BigTextStyle().bigText(mContext.getString(
+                                    R.string.incoming_file_confirm_Notification_content,
+                                    info.mDeviceName, info.mFileName)))
+                            .setSubText(Formatter.formatFileSize(mContext, info.mTotalBytes))
+                            .setSmallIcon(R.drawable.bt_incomming_file_notification)
+                            .setLocalOnly(true)
+                            .setVisibility(Notification.VISIBILITY_PRIVATE)
+                            .setPublicVersion(public_n)
                             .build();
             mNotificationMgr.notify(NOTIFICATION_ID_PROGRESS, n);
         }

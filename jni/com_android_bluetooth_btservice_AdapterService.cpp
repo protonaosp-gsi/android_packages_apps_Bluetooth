@@ -682,7 +682,7 @@ static void classInitNative(JNIEnv* env, jclass clazz) {
 
 static bool initNative(JNIEnv* env, jobject obj, jboolean isGuest,
                        jboolean isNiapMode, int configCompareResult,
-                       jobjectArray initFlags) {
+                       jobjectArray initFlags, jboolean isAtvDevice) {
   ALOGV("%s", __func__);
 
   android_bluetooth_UidTraffic.clazz =
@@ -711,7 +711,8 @@ static bool initNative(JNIEnv* env, jobject obj, jboolean isGuest,
 
   int ret = sBluetoothInterface->init(
       &sBluetoothCallbacks, isGuest == JNI_TRUE ? 1 : 0,
-      isNiapMode == JNI_TRUE ? 1 : 0, configCompareResult, flags);
+      isNiapMode == JNI_TRUE ? 1 : 0, configCompareResult, flags,
+      isAtvDevice == JNI_TRUE ? 1 : 0);
 
   for (int i = 0; i < flagCount; i++) {
     env->ReleaseStringUTFChars(flagObjs[i], flags[i]);
@@ -1238,6 +1239,16 @@ static jbyteArray obfuscateAddressNative(JNIEnv* env, jobject obj,
   return output_bytes;
 }
 
+static jboolean setBufferMillisNative(JNIEnv* env, jobject obj, jint codec,
+                                      jint size) {
+  ALOGV("%s", __func__);
+
+  if (!sBluetoothInterface) return JNI_FALSE;
+
+  int ret = sBluetoothInterface->set_dynamic_audio_buffer_size(codec, size);
+  return (ret == BT_STATUS_SUCCESS) ? JNI_TRUE : JNI_FALSE;
+}
+
 static jint connectSocketNative(JNIEnv* env, jobject obj, jbyteArray address,
                                 jint type, jbyteArray uuid, jint port,
                                 jint flag, jint callingUid) {
@@ -1335,7 +1346,7 @@ static int getMetricIdNative(JNIEnv* env, jobject obj, jbyteArray address) {
 static JNINativeMethod sMethods[] = {
     /* name, signature, funcPtr */
     {"classInitNative", "()V", (void*)classInitNative},
-    {"initNative", "(ZZI[Ljava/lang/String;)Z", (void*)initNative},
+    {"initNative", "(ZZI[Ljava/lang/String;Z)Z", (void*)initNative},
     {"cleanupNative", "()V", (void*)cleanupNative},
     {"enableNative", "()Z", (void*)enableNative},
     {"disableNative", "()Z", (void*)disableNative},
@@ -1364,6 +1375,7 @@ static JNINativeMethod sMethods[] = {
     {"interopDatabaseClearNative", "()V", (void*)interopDatabaseClearNative},
     {"interopDatabaseAddNative", "(I[BI)V", (void*)interopDatabaseAddNative},
     {"obfuscateAddressNative", "([B)[B", (void*)obfuscateAddressNative},
+    {"setBufferMillisNative", "(II)Z", (void*)setBufferMillisNative},
     {"getMetricIdNative", "([B)I", (void*)getMetricIdNative},
     {"connectSocketNative", "([BI[BIII)I", (void*)connectSocketNative},
     {"createSocketChannelNative", "(ILjava/lang/String;[BIII)I",
@@ -1397,6 +1409,13 @@ jint JNI_OnLoad(JavaVM* jvm, void* reserved) {
   status = android::register_com_android_bluetooth_btservice_AdapterService(e);
   if (status < 0) {
     ALOGE("jni adapter service registration failure, status: %d", status);
+    return JNI_ERR;
+  }
+
+  status =
+      android::register_com_android_bluetooth_btservice_activity_attribution(e);
+  if (status < 0) {
+    ALOGE("jni activity attribution registration failure: %d", status);
     return JNI_ERR;
   }
 
@@ -1475,6 +1494,12 @@ jint JNI_OnLoad(JavaVM* jvm, void* reserved) {
   status = android::register_com_android_bluetooth_hearing_aid(e);
   if (status < 0) {
     ALOGE("jni hearing aid registration failure: %d", status);
+    return JNI_ERR;
+  }
+
+  status = android::register_com_android_bluetooth_le_audio(e);
+  if (status < 0) {
+    ALOGE("jni le_audio registration failure: %d", status);
     return JNI_ERR;
   }
 

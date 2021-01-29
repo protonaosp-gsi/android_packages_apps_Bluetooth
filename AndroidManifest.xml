@@ -12,10 +12,10 @@
          android:description="@string/permdesc_bluetoothShareManager"
          android:protectionLevel="signature"/>
 
-    <!--  Allows temporarily whitelisting Bluetooth addresses for sharing -->
-    <permission android:name="com.android.permission.WHITELIST_BLUETOOTH_DEVICE"
-         android:label="@string/permlab_bluetoothWhitelist"
-         android:description="@string/permdesc_bluetoothWhitelist"
+    <!--  Allows temporarily acceptlisting Bluetooth addresses for sharing -->
+    <permission android:name="com.android.permission.ALLOWLIST_BLUETOOTH_DEVICE"
+         android:label="@string/permlab_bluetoothAcceptlist"
+         android:description="@string/permdesc_bluetoothAcceptlist"
          android:protectionLevel="signature"/>
 
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
@@ -26,6 +26,7 @@
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN"/>
     <uses-permission android:name="android.permission.BLUETOOTH_PRIVILEGED"/>
     <uses-permission android:name="android.permission.BLUETOOTH_MAP"/>
+    <uses-permission android:name="android.permission.CONTROL_INCALL_EXPERIENCE" />
     <uses-permission android:name="android.permission.DUMP"/>
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
@@ -120,10 +121,10 @@
         </receiver>
          <receiver android:process="@string/process"
               android:name=".opp.BluetoothOppHandoverReceiver"
-              android:permission="com.android.permission.WHITELIST_BLUETOOTH_DEVICE"
+              android:permission="com.android.permission.ALLOWLIST_BLUETOOTH_DEVICE"
               android:exported="true">
             <intent-filter>
-                <action android:name="android.btopp.intent.action.WHITELIST_DEVICE"/>
+                <action android:name="android.btopp.intent.action.ACCEPTLIST_DEVICE"/>
                 <action android:name="android.btopp.intent.action.STOP_HANDOVER_TRANSFER"/>
             </intent-filter>
             <intent-filter>
@@ -405,6 +406,14 @@
                 <action android:name="android.bluetooth.IBluetoothHearingAid"/>
             </intent-filter>
         </service>
+        <service
+            android:process="@string/process"
+            android:name = ".le_audio.LeAudioService"
+            android:exported = "true">
+            <intent-filter>
+                <action android:name="android.bluetooth.IBluetoothLeAudio" />
+            </intent-filter>
+        </service>
         <!-- Authenticator for PBAP account. -->
         <service android:process="@string/process"
              android:name=".pbapclient.AuthenticationService"
@@ -416,5 +425,19 @@
             <meta-data android:name="android.accounts.AccountAuthenticator"
                  android:resource="@xml/authenticator"/>
         </service>
+        <service
+            android:name=".telephony.BluetoothInCallService"
+            android:permission="android.permission.BIND_INCALL_SERVICE"
+            android:process="@string/process"
+            android:enabled="@bool/profile_supported_hfp_incallservice"
+            android:exported="true">
+            <meta-data android:name="android.telecom.IN_CALL_SERVICE_RINGING"
+                       android:value="true" />
+            <meta-data android:name="android.telecom.INCLUDE_SELF_MANAGED_CALLS"
+                       android:value="true" />
+            <intent-filter>
+              <action android:name="android.telecom.InCallService"/>
+            </intent-filter>
+         </service>
     </application>
 </manifest>
