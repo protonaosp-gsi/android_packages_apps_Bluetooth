@@ -31,6 +31,7 @@ import android.net.ConnectivityManager;
 import android.net.InetAddresses;
 import android.net.InterfaceConfiguration;
 import android.net.LinkAddress;
+import android.net.TetheringManager;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.INetworkManagementService;
@@ -289,25 +290,6 @@ public class PanService extends ProfileService {
             return service.getConnectionState(device);
         }
 
-        private boolean isPanNapOn() {
-            PanService service = getService();
-            if (service == null) {
-                return false;
-            }
-            return service.isPanNapOn();
-        }
-
-        private boolean isPanUOn() {
-            if (DBG) {
-                Log.d(TAG, "isTetheringOn call getPanLocalRoleNative");
-            }
-            PanService service = getService();
-            if (service == null) {
-                return false;
-            }
-            return service.isPanUOn();
-        }
-
         @Override
         public boolean isTetheringOn() {
             // TODO(BT) have a variable marking the on/off state
@@ -380,20 +362,6 @@ public class PanService extends ProfileService {
             return BluetoothPan.STATE_DISCONNECTED;
         }
         return panDevice.mState;
-    }
-
-    boolean isPanNapOn() {
-        if (DBG) {
-            Log.d(TAG, "isTetheringOn call getPanLocalRoleNative");
-        }
-        return (getPanLocalRoleNative() & BluetoothPan.LOCAL_NAP_ROLE) != 0;
-    }
-
-    boolean isPanUOn() {
-        if (DBG) {
-            Log.d(TAG, "isTetheringOn call getPanLocalRoleNative");
-        }
-        return (getPanLocalRoleNative() & BluetoothPan.LOCAL_PANU_ROLE) != 0;
     }
 
     public boolean isTetheringOn() {
@@ -674,9 +642,8 @@ public class PanService extends ProfileService {
 
         IBinder b = ServiceManager.getService(Context.NETWORKMANAGEMENT_SERVICE);
         INetworkManagementService service = INetworkManagementService.Stub.asInterface(b);
-        ConnectivityManager cm =
-                (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
-        String[] bluetoothRegexs = cm.getTetherableBluetoothRegexs();
+        TetheringManager tm = getBaseContext().getSystemService(TetheringManager.class);
+        String[] bluetoothRegexs = tm.getTetherableBluetoothRegexs();
 
         // bring toggle the interfaces
         String[] currentIfaces = new String[0];
@@ -722,13 +689,13 @@ public class PanService extends ProfileService {
                 service.setInterfaceConfig(iface, ifcg);
 
                 if (enable) {
-                    int tetherStatus = cm.tether(iface);
+                    int tetherStatus = tm.tether(iface);
                     if (tetherStatus != ConnectivityManager.TETHER_ERROR_NO_ERROR) {
                         Log.e(TAG, "Error tethering " + iface + " tetherStatus: " + tetherStatus);
                         return null;
                     }
                 } else {
-                    int untetherStatus = cm.untether(iface);
+                    int untetherStatus = tm.untether(iface);
                     Log.i(TAG, "Untethered: " + iface + " untetherStatus: " + untetherStatus);
                 }
             }
@@ -800,7 +767,5 @@ public class PanService extends ProfileService {
     private native boolean connectPanNative(byte[] btAddress, int localRole, int remoteRole);
 
     private native boolean disconnectPanNative(byte[] btAddress);
-
-    private native int getPanLocalRoleNative();
 
 }
