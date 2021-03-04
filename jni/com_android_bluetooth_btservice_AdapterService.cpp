@@ -55,6 +55,7 @@ static jmethodID method_sspRequestCallback;
 static jmethodID method_bondStateChangeCallback;
 static jmethodID method_aclStateChangeCallback;
 static jmethodID method_discoveryStateChangeCallback;
+static jmethodID method_linkQualityReportCallback;
 static jmethodID method_setWakeAlarm;
 static jmethodID method_acquireWakeLock;
 static jmethodID method_releaseWakeLock;
@@ -286,7 +287,7 @@ static void bond_state_changed_callback(bt_status_t status, RawAddress* bd_addr,
 }
 
 static void acl_state_changed_callback(bt_status_t status, RawAddress* bd_addr,
-                                       bt_acl_state_t state) {
+                                       bt_acl_state_t state, bt_hci_error_code_t hci_reason) {
   if (!bd_addr) {
     ALOGE("Address is null in %s", __func__);
     return;
@@ -305,7 +306,7 @@ static void acl_state_changed_callback(bt_status_t status, RawAddress* bd_addr,
                                    (jbyte*)bd_addr);
 
   sCallbackEnv->CallVoidMethod(sJniCallbacksObj, method_aclStateChangeCallback,
-                               (jint)status, addr.get(), (jint)state);
+                               (jint)status, addr.get(), (jint)state, (jint)hci_reason);
 }
 
 static void discovery_state_changed_callback(bt_discovery_state_t state) {
@@ -387,6 +388,24 @@ static void ssp_request_callback(RawAddress* bd_addr, bt_bdname_t* bdname,
                                (jint)pairing_variant, pass_key);
 }
 
+static void link_quality_report_callback(
+    uint64_t timestamp, int report_id, int rssi, int snr,
+    int retransmission_count, int packets_not_receive_count,
+    int negative_acknowledgement_count) {
+  CallbackEnv sCallbackEnv(__func__);
+  if (!sCallbackEnv.valid()) return;
+
+  ALOGV("%s: LinkQualityReportCallback: %d %d %d %d %d %d", __func__,
+        report_id, rssi, snr, retransmission_count, packets_not_receive_count,
+        negative_acknowledgement_count);
+
+  sCallbackEnv->CallVoidMethod(
+      sJniCallbacksObj, method_linkQualityReportCallback,
+      (jlong)timestamp, (jint)report_id, (jint)rssi, (jint)snr,
+      (jint)retransmission_count, (jint)packets_not_receive_count,
+      (jint)negative_acknowledgement_count);
+}
+
 static void callback_thread_event(bt_cb_thread_evt event) {
   if (event == ASSOCIATE_JVM) {
     JavaVMAttachArgs args;
@@ -454,7 +473,8 @@ static bt_callbacks_t sBluetoothCallbacks = {
     pin_request_callback,        ssp_request_callback,
     bond_state_changed_callback, acl_state_changed_callback,
     callback_thread_event,       dut_mode_recv_callback,
-    le_test_mode_recv_callback,  energy_info_recv_callback};
+    le_test_mode_recv_callback,  energy_info_recv_callback,
+    link_quality_report_callback};
 
 // The callback to call when the wake alarm fires.
 static alarm_cb sAlarmCallback;
@@ -661,7 +681,10 @@ static void classInitNative(JNIEnv* env, jclass clazz) {
       env->GetMethodID(jniCallbackClass, "bondStateChangeCallback", "(I[BI)V");
 
   method_aclStateChangeCallback =
-      env->GetMethodID(jniCallbackClass, "aclStateChangeCallback", "(I[BI)V");
+      env->GetMethodID(jniCallbackClass, "aclStateChangeCallback", "(I[BII)V");
+
+  method_linkQualityReportCallback = env->GetMethodID(
+      jniCallbackClass, "linkQualityReportCallback", "(JIIIIII)V");
 
   method_setWakeAlarm = env->GetMethodID(clazz, "setWakeAlarm", "(JZ)Z");
   method_acquireWakeLock =
@@ -1239,8 +1262,8 @@ static jbyteArray obfuscateAddressNative(JNIEnv* env, jobject obj,
   return output_bytes;
 }
 
-static jboolean setBufferMillisNative(JNIEnv* env, jobject obj, jint codec,
-                                      jint size) {
+static jboolean setBufferLengthMillisNative(JNIEnv* env, jobject obj,
+                                            jint codec, jint size) {
   ALOGV("%s", __func__);
 
   if (!sBluetoothInterface) return JNI_FALSE;
@@ -1375,7 +1398,8 @@ static JNINativeMethod sMethods[] = {
     {"interopDatabaseClearNative", "()V", (void*)interopDatabaseClearNative},
     {"interopDatabaseAddNative", "(I[BI)V", (void*)interopDatabaseAddNative},
     {"obfuscateAddressNative", "([B)[B", (void*)obfuscateAddressNative},
-    {"setBufferMillisNative", "(II)Z", (void*)setBufferMillisNative},
+    {"setBufferLengthMillisNative", "(II)Z",
+     (void*)setBufferLengthMillisNative},
     {"getMetricIdNative", "([B)I", (void*)getMetricIdNative},
     {"connectSocketNative", "([BI[BIII)I", (void*)connectSocketNative},
     {"createSocketChannelNative", "(ILjava/lang/String;[BIII)I",

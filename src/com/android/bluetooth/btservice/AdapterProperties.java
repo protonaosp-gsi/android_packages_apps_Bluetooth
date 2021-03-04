@@ -555,8 +555,8 @@ class AdapterProperties {
      * @param codec the codecs to set
      * @param size the size to set
      */
-    boolean setBufferMillis(int codec, int value) {
-        return mService.setBufferMillisNative(codec, value);
+    boolean setBufferLengthMillis(int codec, int value) {
+        return mService.setBufferLengthMillisNative(codec, value);
     }
 
     /**
@@ -857,7 +857,6 @@ class AdapterProperties {
                     case AbstractionLayer.BT_PROPERTY_BDADDR:
                         mAddress = val;
                         String address = Utils.getAddressStringFromByte(mAddress);
-                        debugLog("Address is:" + address);
                         intent = new Intent(BluetoothAdapter.ACTION_BLUETOOTH_ADDRESS_CHANGED);
                         intent.putExtra(BluetoothAdapter.EXTRA_BLUETOOTH_ADDRESS, address);
                         intent.addFlags(Intent.FLAG_RECEIVER_REGISTERED_ONLY_BEFORE_BOOT);
