@@ -102,6 +102,7 @@ public class MapClientStateMachineTest {
                 mTargetContext.getResources().getBoolean(R.bool.profile_supported_mapmce));
         TestUtils.setAdapterService(mAdapterService);
         when(mAdapterService.getDatabase()).thenReturn(mDatabaseManager);
+        doReturn(true, false).when(mAdapterService).isStartedProfile(anyString());
         TestUtils.startService(mServiceRule, MapClientService.class);
         mMockContentResolver.addProvider("sms", mMockContentProvider);
         mMockContentResolver.addProvider("mms", mMockContentProvider);

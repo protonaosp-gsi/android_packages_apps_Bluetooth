@@ -138,6 +138,7 @@ public class AdapterService extends Service {
     private long mEnergyUsedTotalVoltAmpSecMicro;
     private final SparseArray<UidTraffic> mUidTraffic = new SparseArray<>();
 
+    private final ArrayList<String> mStartedProfiles = new ArrayList<>();
     private final ArrayList<ProfileService> mRegisteredProfiles = new ArrayList<>();
     private final ArrayList<ProfileService> mRunningProfiles = new ArrayList<>();
 
@@ -305,6 +306,16 @@ public class AdapterService extends Service {
         mHandler.sendMessage(m);
     }
 
+    /**
+     * Confirm whether the ProfileService is started expectedly.
+     *
+     * @param string the service simple name.
+     * @return true if the service is started expectedly, false otherwise.
+     */
+    public boolean isStartedProfile(String serviceSampleName) {
+        return mStartedProfiles.contains(serviceSampleName);
+    }
+
     private static final int MESSAGE_PROFILE_SERVICE_STATE_CHANGED = 1;
     private static final int MESSAGE_PROFILE_SERVICE_REGISTERED = 2;
     private static final int MESSAGE_PROFILE_SERVICE_UNREGISTERED = 3;
@@ -468,7 +479,7 @@ public class AdapterService extends Service {
         mAdapterProperties = new AdapterProperties(this);
         mAdapterStateMachine = AdapterState.make(this);
         mJniCallbacks = new JniCallbacks(this, mAdapterProperties);
-        mBluetoothKeystoreService = new BluetoothKeystoreService(isNiapMode());
+        mBluetoothKeystoreService = new BluetoothKeystoreService(isCommonCriteriaMode());
         mBluetoothKeystoreService.start();
         mActivityAttributionService = new ActivityAttributionService();
         mActivityAttributionService.start();
@@ -477,7 +488,8 @@ public class AdapterService extends Service {
         // Android TV doesn't show consent dialogs for just works and encryption only le pairing
         boolean isAtvDevice = getApplicationContext().getPackageManager().hasSystemFeature(
                 PackageManager.FEATURE_LEANBACK_ONLY);
-        initNative(isGuest(), isNiapMode(), configCompareResult, getInitFlags(), isAtvDevice);
+        initNative(isGuest(), isCommonCriteriaMode(), configCompareResult, getInitFlags(),
+                isAtvDevice);
         mNativeAvailable = true;
         mCallbacks = new RemoteCallbackList<IBluetoothCallback>();
         mAppOps = getSystemService(AppOpsManager.class);
@@ -877,6 +889,11 @@ public class AdapterService extends Service {
     }
 
     private void setProfileServiceState(Class service, int state) {
+        if (state == BluetoothAdapter.STATE_ON) {
+            mStartedProfiles.add(service.getSimpleName());
+        } else if (state == BluetoothAdapter.STATE_OFF) {
+            mStartedProfiles.remove(service.getSimpleName());
+        }
         Intent intent = new Intent(this, service);
         intent.putExtra(EXTRA_ACTION, ACTION_SERVICE_STATE_CHANGED);
         intent.putExtra(BluetoothAdapter.EXTRA_STATE, state);
@@ -1488,15 +1505,24 @@ public class AdapterService extends Service {
         }
 
         @Override
-        public boolean createBond(BluetoothDevice device, int transport, OobData oobData) {
+        public boolean createBond(BluetoothDevice device, int transport, OobData remoteP192Data,
+                OobData remoteP256Data) {
             AdapterService service = getService();
             if (service == null || !callerIsSystemOrActiveOrManagedUser(service, TAG, "createBond")) {
                 return false;
             }
 
-            enforceBluetoothAdminPermission(service);
+            // This conditional is required to satisfy permission dependencies
+            // since createBond calls createBondOutOfBand with null value passed as data.
+            // BluetoothDevice#createBond requires BLUETOOTH_ADMIN only.
+            if (remoteP192Data == null && remoteP256Data == null) {
+                enforceBluetoothAdminPermission(service);
+            } else {
+                // createBondOutOfBand() is a @SystemApi, this requires PRIVILEGED.
+                enforceBluetoothPrivilegedPermission(service);
+            }
 
-            return service.createBond(device, transport, oobData);
+            return service.createBond(device, transport, remoteP192Data, remoteP256Data);
         }
 
         @Override
@@ -2383,7 +2409,8 @@ public class AdapterService extends Service {
         return mDatabaseManager;
     }
 
-    boolean createBond(BluetoothDevice device, int transport, OobData oobData) {
+    boolean createBond(BluetoothDevice device, int transport, OobData remoteP192Data,
+            OobData remoteP256Data) {
         DeviceProperties deviceProp = mRemoteDevices.getDeviceProperties(device);
         if (deviceProp != null && deviceProp.getBondState() != BluetoothDevice.BOND_NONE) {
             return false;
@@ -2399,10 +2426,18 @@ public class AdapterService extends Service {
         msg.obj = device;
         msg.arg1 = transport;
 
-        if (oobData != null) {
-            Bundle oobDataBundle = new Bundle();
-            oobDataBundle.putParcelable(BondStateMachine.OOBDATA, oobData);
-            msg.setData(oobDataBundle);
+        Bundle remoteOobDatasBundle = new Bundle();
+        boolean setData = false;
+        if (remoteP192Data != null) {
+            remoteOobDatasBundle.putParcelable(BondStateMachine.OOBDATAP192, remoteP192Data);
+            setData = true;
+        }
+        if (remoteP256Data != null) {
+            remoteOobDatasBundle.putParcelable(BondStateMachine.OOBDATAP256, remoteP256Data);
+            setData = true;
+        }
+        if (setData) {
+            msg.setData(remoteOobDatasBundle);
         }
         mBondStateMachine.sendMessage(msg);
         return true;
@@ -3238,7 +3273,7 @@ public class AdapterService extends Service {
         return UserManager.get(this).isGuestUser();
     }
 
-    private boolean isNiapMode() {
+    private boolean isCommonCriteriaMode() {
         return ((DevicePolicyManager) getSystemService(Context.DEVICE_POLICY_SERVICE))
                 .isCommonCriteriaModeEnabled(null);
     }
@@ -3387,8 +3422,8 @@ public class AdapterService extends Service {
 
     static native void classInitNative();
 
-    native boolean initNative(boolean startRestricted, boolean isNiapMode, int configCompareResult,
-            String[] initFlags, boolean isAtvDevice);
+    native boolean initNative(boolean startRestricted, boolean isCommonCriteriaMode,
+            int configCompareResult, String[] initFlags, boolean isAtvDevice);
 
     native void cleanupNative();
 
@@ -3420,7 +3455,8 @@ public class AdapterService extends Service {
     public native boolean createBondNative(byte[] address, int transport);
 
     /*package*/
-    native boolean createBondOutOfBandNative(byte[] address, int transport, OobData oobData);
+    native boolean createBondOutOfBandNative(byte[] address, int transport,
+            OobData p192Data, OobData p256Data);
 
     /*package*/
     public native boolean removeBondNative(byte[] address);
