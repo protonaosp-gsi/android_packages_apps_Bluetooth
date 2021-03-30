@@ -97,6 +97,7 @@ public class ScanManager {
     private Set<ScanClient> mRegularScanClients;
     private Set<ScanClient> mBatchClients;
     private Set<ScanClient> mSuspendedScanClients;
+    private HashMap<Integer, Integer> mPriorityMap = new HashMap<Integer, Integer>();
 
     private CountDownLatch mLatch;
 
@@ -129,6 +130,12 @@ public class ScanManager {
         mDm = (DisplayManager) mService.getSystemService(Context.DISPLAY_SERVICE);
         mActivityManager = (ActivityManager) mService.getSystemService(Context.ACTIVITY_SERVICE);
         mLocationManager = (LocationManager) mService.getSystemService(Context.LOCATION_SERVICE);
+
+        mPriorityMap.put(ScanSettings.SCAN_MODE_OPPORTUNISTIC, 0);
+        mPriorityMap.put(ScanSettings.SCAN_MODE_LOW_POWER, 1);
+        mPriorityMap.put(ScanSettings.SCAN_MODE_BALANCED, 2);
+        mPriorityMap.put(ScanSettings.SCAN_MODE_AMBIENT_DISCOVERY, 3);
+        mPriorityMap.put(ScanSettings.SCAN_MODE_LOW_LATENCY, 4);
     }
 
     void start() {
@@ -300,7 +307,9 @@ public class ScanManager {
         }
 
         void handleStartScan(ScanClient client) {
-            Utils.enforceAdminPermission(mService);
+            if (!Utils.checkConnectPermissionForPreflight(mService)) {
+                return;
+            }
             if (DBG) {
                 Log.d(TAG, "handling starting scan");
             }
@@ -367,8 +376,7 @@ public class ScanManager {
         }
 
         void handleStopScan(ScanClient client) {
-            Utils.enforceAdminPermission(mService);
-            if (client == null) {
+            if (client == null || !Utils.checkConnectPermissionForPreflight(mService)) {
                 return;
             }
 
@@ -398,8 +406,8 @@ public class ScanManager {
         }
 
         void handleFlushBatchResults(ScanClient client) {
-            Utils.enforceAdminPermission(mService);
-            if (!mBatchClients.contains(client)) {
+            if (!mBatchClients.contains(client)
+                    || !Utils.checkConnectPermissionForPreflight(mService)) {
                 return;
             }
             mScanNative.flushBatchResults(client.scannerId);
@@ -512,6 +520,8 @@ public class ScanManager {
         private static final int SCAN_MODE_BALANCED_INTERVAL_MS = 4096;
         private static final int SCAN_MODE_LOW_LATENCY_WINDOW_MS = 4096;
         private static final int SCAN_MODE_LOW_LATENCY_INTERVAL_MS = 4096;
+        private static final int SCAN_MODE_AMBIENT_DISCOVERY_WINDOW_MS = 128;
+        private static final int SCAN_MODE_AMBIENT_DISCOVERY_INTERVAL_MS = 640;
 
         /**
          * Onfound/onlost for scan settings
@@ -530,6 +540,8 @@ public class ScanManager {
         private static final int SCAN_MODE_BATCH_BALANCED_INTERVAL_MS = 15000;
         private static final int SCAN_MODE_BATCH_LOW_LATENCY_WINDOW_MS = 1500;
         private static final int SCAN_MODE_BATCH_LOW_LATENCY_INTERVAL_MS = 5000;
+        private static final int SCAN_MODE_BATCH_AMBIENT_DISCOVERY_WINDOW_MS = 1500;
+        private static final int SCAN_MODE_BATCH_AMBIENT_DISCOVERY_INTERVAL_MS = 15000;
 
         // The logic is AND for each filter field.
         private static final int LIST_LOGIC_TYPE = 0x1111111;
@@ -631,13 +643,12 @@ public class ScanManager {
 
         ScanClient getAggressiveClient(Set<ScanClient> cList) {
             ScanClient result = null;
-            int curScanSetting = Integer.MIN_VALUE;
+            int currentScanModePriority = Integer.MIN_VALUE;
             for (ScanClient client : cList) {
-                // ScanClient scan settings are assumed to be monotonically increasing in value for
-                // more power hungry(higher duty cycle) operation.
-                if (client.settings.getScanMode() > curScanSetting) {
+                int priority = mPriorityMap.get(client.settings.getScanMode());
+                if (priority > currentScanModePriority) {
                     result = client;
-                    curScanSetting = client.settings.getScanMode();
+                    currentScanModePriority = priority;
                 }
             }
             return result;
@@ -775,6 +786,8 @@ public class ScanManager {
                     return SCAN_MODE_BATCH_BALANCED_WINDOW_MS;
                 case ScanSettings.SCAN_MODE_LOW_POWER:
                     return SCAN_MODE_BATCH_LOW_POWER_WINDOW_MS;
+                case ScanSettings.SCAN_MODE_AMBIENT_DISCOVERY:
+                    return SCAN_MODE_BATCH_AMBIENT_DISCOVERY_WINDOW_MS;
                 default:
                     return SCAN_MODE_BATCH_LOW_POWER_WINDOW_MS;
             }
@@ -788,6 +801,8 @@ public class ScanManager {
                     return SCAN_MODE_BATCH_BALANCED_INTERVAL_MS;
                 case ScanSettings.SCAN_MODE_LOW_POWER:
                     return SCAN_MODE_BATCH_LOW_POWER_INTERVAL_MS;
+                case ScanSettings.SCAN_MODE_AMBIENT_DISCOVERY:
+                    return SCAN_MODE_BATCH_AMBIENT_DISCOVERY_INTERVAL_MS;
                 default:
                     return SCAN_MODE_BATCH_LOW_POWER_INTERVAL_MS;
             }
@@ -1153,6 +1168,8 @@ public class ScanManager {
                         resolver,
                         Settings.Global.BLE_SCAN_LOW_POWER_WINDOW_MS,
                         SCAN_MODE_LOW_POWER_WINDOW_MS);
+                case ScanSettings.SCAN_MODE_AMBIENT_DISCOVERY:
+                    return SCAN_MODE_AMBIENT_DISCOVERY_WINDOW_MS;
                 default:
                     return Settings.Global.getInt(
                         resolver,
@@ -1185,6 +1202,8 @@ public class ScanManager {
                         resolver,
                         Settings.Global.BLE_SCAN_LOW_POWER_INTERVAL_MS,
                         SCAN_MODE_LOW_POWER_INTERVAL_MS);
+                case ScanSettings.SCAN_MODE_AMBIENT_DISCOVERY:
+                    return SCAN_MODE_AMBIENT_DISCOVERY_INTERVAL_MS;
                 default:
                     return Settings.Global.getInt(
                         resolver,
