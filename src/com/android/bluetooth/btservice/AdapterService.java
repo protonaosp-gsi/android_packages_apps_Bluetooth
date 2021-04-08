@@ -27,7 +27,6 @@ import static com.android.bluetooth.Utils.hasBluetoothPrivilegedPermission;
 import static com.android.bluetooth.Utils.isPackageNameAccurate;
 
 import android.annotation.NonNull;
-import android.annotation.Nullable;
 import android.app.ActivityManager;
 import android.app.AlarmManager;
 import android.app.AppOpsManager;
@@ -48,10 +47,12 @@ import android.bluetooth.IBluetooth;
 import android.bluetooth.IBluetoothCallback;
 import android.bluetooth.IBluetoothConnectionCallback;
 import android.bluetooth.IBluetoothMetadataListener;
+import android.bluetooth.IBluetoothOobDataCallback;
 import android.bluetooth.IBluetoothSocketManager;
 import android.bluetooth.OobData;
 import android.bluetooth.UidTraffic;
 import android.companion.CompanionDeviceManager;
+import android.content.AttributionSource;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
@@ -121,6 +122,7 @@ import java.io.FileDescriptor;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -1398,18 +1400,18 @@ public class AdapterService extends Service {
         }
 
         @Override
-        public boolean startDiscovery(String callingPackage, String callingFeatureId) {
+        public boolean startDiscovery(AttributionSource attributionSource) {
             AdapterService service = getService();
             if (service == null || !callerIsSystemOrActiveUser(TAG, "startDiscovery")) {
                 return false;
             }
 
             if (!Utils.checkScanPermissionForDataDelivery(
-                    service, callingPackage, callingFeatureId, "Starting discovery.")) {
+                    service, attributionSource, "Starting discovery.")) {
                 return false;
             }
 
-            return service.startDiscovery(callingPackage, callingFeatureId);
+            return service.startDiscovery(attributionSource);
         }
 
         @Override
@@ -1580,6 +1582,26 @@ public class AdapterService extends Service {
 
             DeviceProperties deviceProp = service.mRemoteDevices.getDeviceProperties(device);
             return deviceProp != null && deviceProp.isBondingInitiatedLocally();
+        }
+
+        @Override
+        public void generateLocalOobData(int transport, IBluetoothOobDataCallback callback) {
+            AdapterService service = getService();
+            if (service == null || !callerIsSystemOrActiveOrManagedUser(service,
+                    TAG, "generateLocalOobData")) {
+                return;
+            }
+            enforceBluetoothPrivilegedPermission(service);
+            if (transport == BluetoothDevice.TRANSPORT_LE) {
+                // TODO(184377951): LE isn't yet supported, coming soon
+                try {
+                    callback.onError(BluetoothAdapter.OOB_ERROR_UNKNOWN);
+                } catch (RemoteException e) {
+                    Log.e(TAG, "Failed to call callback");
+                }
+                return;
+            }
+            service.generateLocalOobData(transport, callback);
         }
 
         @Override
@@ -2343,13 +2365,14 @@ public class AdapterService extends Service {
         }
     }
 
-    boolean startDiscovery(String callingPackage, @Nullable String callingFeatureId) {
+    boolean startDiscovery(AttributionSource attributionSource) {
         UserHandle callingUser = UserHandle.of(UserHandle.getCallingUserId());
         debugLog("startDiscovery");
+        String callingPackage = attributionSource.getPackageName();
         mAppOps.checkPackage(Binder.getCallingUid(), callingPackage);
         boolean isQApp = Utils.isQApp(this, callingPackage);
         boolean hasDisavowedLocation =
-                Utils.hasDisavowedLocationForScan(this, callingPackage);
+                Utils.hasDisavowedLocationForScan(this, callingPackage, attributionSource);
         String permission = null;
         if (Utils.checkCallerHasNetworkSettingsPermission(this)) {
             permission = android.Manifest.permission.NETWORK_SETTINGS;
@@ -2357,16 +2380,12 @@ public class AdapterService extends Service {
             permission = android.Manifest.permission.NETWORK_SETUP_WIZARD;
         } else if (!hasDisavowedLocation) {
             if (isQApp) {
-                if (!Utils.checkCallerHasFineLocation(this, mAppOps, callingPackage,
-                        callingFeatureId,
-                        callingUser)) {
+                if (!Utils.checkCallerHasFineLocation(this, attributionSource, callingUser)) {
                     return false;
                 }
                 permission = android.Manifest.permission.ACCESS_FINE_LOCATION;
             } else {
-                if (!Utils.checkCallerHasCoarseLocation(this, mAppOps, callingPackage,
-                        callingFeatureId,
-                        callingUser)) {
+                if (!Utils.checkCallerHasCoarseLocation(this, attributionSource, callingUser)) {
                     return false;
                 }
                 permission = android.Manifest.permission.ACCESS_COARSE_LOCATION;
@@ -2445,6 +2464,56 @@ public class AdapterService extends Service {
         }
         mBondStateMachine.sendMessage(msg);
         return true;
+    }
+
+    private final ArrayDeque<IBluetoothOobDataCallback> mOobDataCallbackQueue =
+            new ArrayDeque<>();
+
+    /**
+     * Fetches the local OOB data to give out to remote.
+     *
+     * @param transport - specify data transport.
+     * @param callback - callback used to receive the requested {@link Oobdata}; null will be
+     * ignored silently.
+     *
+     * @hide
+     */
+    public synchronized void generateLocalOobData(int transport,
+            IBluetoothOobDataCallback callback) {
+        if (callback == null) {
+            Log.e(TAG, "'callback' argument must not be null!");
+            return;
+        }
+        if (mOobDataCallbackQueue.peek() != null) {
+            try {
+                callback.onError(BluetoothAdapter.OOB_ERROR_ANOTHER_ACTIVE_REQUEST);
+                return;
+            } catch (RemoteException e) {
+                Log.e(TAG, "Failed to make callback", e);
+            }
+        }
+        mOobDataCallbackQueue.offer(callback);
+        generateLocalOobDataNative(transport);
+    }
+
+    /* package */ synchronized void notifyOobDataCallback(int transport, OobData oobData) {
+        if (mOobDataCallbackQueue.peek() == null) {
+            Log.e(TAG, "Failed to make callback, no callback exists");
+            return;
+        }
+        if (oobData == null) {
+            try {
+                mOobDataCallbackQueue.poll().onError(BluetoothAdapter.OOB_ERROR_UNKNOWN);
+            } catch (RemoteException e) {
+                Log.e(TAG, "Failed to make callback", e);
+            }
+        } else {
+            try {
+                mOobDataCallbackQueue.poll().onOobData(transport, oobData);
+            } catch (RemoteException e) {
+                Log.e(TAG, "Failed to make callback", e);
+            }
+        }
     }
 
     public boolean isQuietModeEnabled() {
@@ -3584,6 +3653,9 @@ public class AdapterService extends Service {
 
     /*package*/
     native boolean cancelBondNative(byte[] address);
+
+    /*package*/
+    native void generateLocalOobDataNative(int transport);
 
     /*package*/
     native boolean sdpSearchNative(byte[] address, byte[] uuid);
