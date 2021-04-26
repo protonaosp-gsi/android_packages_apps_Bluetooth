@@ -58,6 +58,7 @@ import android.os.Looper;
 import android.os.Message;
 import android.util.Log;
 
+import com.android.bluetooth.Utils;
 import com.android.bluetooth.btservice.ProfileService;
 import com.android.bluetooth.statemachine.State;
 import com.android.bluetooth.statemachine.StateMachine;
@@ -617,7 +618,6 @@ final class A2dpStateMachine extends StateMachine {
 
     // NOTE: This event is processed in any state
     @VisibleForTesting
-    @RequiresPermission(android.Manifest.permission.BLUETOOTH_CONNECT)
     void processCodecConfigEvent(BluetoothCodecStatus newCodecStatus) {
         BluetoothCodecConfig prevCodecConfig = null;
         BluetoothCodecStatus prevCodecStatus = mCodecStatus;
@@ -685,7 +685,8 @@ final class A2dpStateMachine extends StateMachine {
         intent.putExtra(BluetoothDevice.EXTRA_DEVICE, mDevice);
         intent.addFlags(Intent.FLAG_RECEIVER_REGISTERED_ONLY_BEFORE_BOOT
                         | Intent.FLAG_RECEIVER_INCLUDE_BACKGROUND);
-        mA2dpService.sendBroadcast(intent, BLUETOOTH_CONNECT);
+        mA2dpService.sendBroadcast(intent, BLUETOOTH_CONNECT,
+                Utils.getTempAllowlistBroadcastOptions());
     }
 
     private void broadcastAudioState(int newState, int prevState) {
@@ -696,7 +697,8 @@ final class A2dpStateMachine extends StateMachine {
         intent.putExtra(BluetoothProfile.EXTRA_PREVIOUS_STATE, prevState);
         intent.putExtra(BluetoothProfile.EXTRA_STATE, newState);
         intent.addFlags(Intent.FLAG_RECEIVER_REGISTERED_ONLY_BEFORE_BOOT);
-        mA2dpService.sendBroadcast(intent, BLUETOOTH_CONNECT);
+        mA2dpService.sendBroadcast(intent, BLUETOOTH_CONNECT,
+                Utils.getTempAllowlistBroadcastOptions());
     }
 
     @Override
@@ -767,7 +769,6 @@ final class A2dpStateMachine extends StateMachine {
         return Integer.toString(state);
     }
 
-    @RequiresPermission(android.Manifest.permission.BLUETOOTH_CONNECT)
     public void dump(StringBuilder sb) {
         boolean isActive = Objects.equals(mDevice, mA2dpService.getActiveDevice());
         ProfileService.println(sb,

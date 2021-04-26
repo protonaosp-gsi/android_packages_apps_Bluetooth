@@ -279,7 +279,6 @@ public class HeadsetStateMachine extends StateMachine {
          * Broadcast audio and connection state changes to the system. This should be called at the
          * end of enter() method after all the setup is done
          */
-        @RequiresPermission(android.Manifest.permission.BLUETOOTH_CONNECT)
         void broadcastStateTransitions() {
             if (mPrevState == null) {
                 return;
@@ -299,7 +298,6 @@ public class HeadsetStateMachine extends StateMachine {
         }
 
         // Should not be called from enter() method
-        @RequiresPermission(android.Manifest.permission.BLUETOOTH_CONNECT)
         void broadcastConnectionState(BluetoothDevice device, int fromState, int toState) {
             stateLogD("broadcastConnectionState " + device + ": " + fromState + "->" + toState);
             mHeadsetService.onConnectionStateChangedFromStateMachine(device, fromState, toState);
@@ -309,11 +307,10 @@ public class HeadsetStateMachine extends StateMachine {
             intent.putExtra(BluetoothDevice.EXTRA_DEVICE, device);
             intent.addFlags(Intent.FLAG_RECEIVER_INCLUDE_BACKGROUND);
             mHeadsetService.sendBroadcastAsUser(intent, UserHandle.ALL,
-                    BLUETOOTH_CONNECT);
+                    BLUETOOTH_CONNECT, Utils.getTempAllowlistBroadcastOptions());
         }
 
         // Should not be called from enter() method
-        @RequiresPermission(android.Manifest.permission.BLUETOOTH_CONNECT)
         void broadcastAudioState(BluetoothDevice device, int fromState, int toState) {
             stateLogD("broadcastAudioState: " + device + ": " + fromState + "->" + toState);
             BluetoothStatsLog.write(BluetoothStatsLog.BLUETOOTH_SCO_CONNECTION_STATE_CHANGED,
@@ -329,7 +326,7 @@ public class HeadsetStateMachine extends StateMachine {
             intent.putExtra(BluetoothProfile.EXTRA_STATE, toState);
             intent.putExtra(BluetoothDevice.EXTRA_DEVICE, device);
             mHeadsetService.sendBroadcastAsUser(intent, UserHandle.ALL,
-                    BLUETOOTH_CONNECT);
+                    BLUETOOTH_CONNECT, Utils.getTempAllowlistBroadcastOptions());
         }
 
         /**
@@ -1506,7 +1503,8 @@ public class HeadsetStateMachine extends StateMachine {
         intent.putExtra(BluetoothDevice.EXTRA_DEVICE, device);
         intent.addCategory(BluetoothHeadset.VENDOR_SPECIFIC_HEADSET_EVENT_COMPANY_ID_CATEGORY + "."
                 + Integer.toString(companyId));
-        mHeadsetService.sendBroadcastAsUser(intent, UserHandle.ALL, BLUETOOTH_CONNECT);
+        mHeadsetService.sendBroadcastAsUser(intent, UserHandle.ALL, BLUETOOTH_CONNECT,
+                Utils.getTempAllowlistBroadcastOptions());
     }
 
     private void setAudioParameters() {
@@ -1561,10 +1559,7 @@ public class HeadsetStateMachine extends StateMachine {
         return commandType;
     }
 
-    @RequiresPermission(allOf = {
-            android.Manifest.permission.BLUETOOTH_CONNECT,
-            android.Manifest.permission.MODIFY_PHONE_STATE,
-    })
+    @RequiresPermission(android.Manifest.permission.MODIFY_PHONE_STATE)
     private void processDialCall(String number) {
         String dialNumber;
         if (mHeadsetService.hasDeviceInitiatedDialingOut()) {
@@ -1609,10 +1604,7 @@ public class HeadsetStateMachine extends StateMachine {
         mNeedDialingOutReply = true;
     }
 
-    @RequiresPermission(allOf = {
-            android.Manifest.permission.BLUETOOTH_CONNECT,
-            android.Manifest.permission.MODIFY_PHONE_STATE,
-    })
+    @RequiresPermission(android.Manifest.permission.MODIFY_PHONE_STATE)
     private void processVrEvent(int state) {
         if (state == HeadsetHalConstants.VR_STATE_STARTED) {
             if (!mHeadsetService.startVoiceRecognitionByHeadset(mDevice)) {
@@ -1629,7 +1621,6 @@ public class HeadsetStateMachine extends StateMachine {
         }
     }
 
-    @RequiresPermission(android.Manifest.permission.BLUETOOTH_CONNECT)
     private void processVolumeEvent(int volumeType, int volume) {
         // Only current active device can change SCO volume
         if (!mDevice.equals(mHeadsetService.getActiveDevice())) {
@@ -1700,7 +1691,6 @@ public class HeadsetStateMachine extends StateMachine {
         }
     }
 
-    @RequiresPermission(android.Manifest.permission.BLUETOOTH_CONNECT)
     private void processAtCind(BluetoothDevice device) {
         int call, callSetup;
         final HeadsetPhoneState phoneState = mSystemInterface.getHeadsetPhoneState();
@@ -1740,10 +1730,7 @@ public class HeadsetStateMachine extends StateMachine {
         mNativeInterface.copsResponse(device, operatorName);
     }
 
-    @RequiresPermission(allOf = {
-            android.Manifest.permission.BLUETOOTH_CONNECT,
-            android.Manifest.permission.MODIFY_PHONE_STATE
-    })
+    @RequiresPermission(android.Manifest.permission.MODIFY_PHONE_STATE)
     private void processAtClcc(BluetoothDevice device) {
         if (mHeadsetService.isVirtualCallStarted()) {
             // In virtual call, send our phone number instead of remote phone number
@@ -1930,10 +1917,7 @@ public class HeadsetStateMachine extends StateMachine {
     }
 
     // HSP +CKPD command
-    @RequiresPermission(allOf = {
-            android.Manifest.permission.BLUETOOTH_CONNECT,
-            android.Manifest.permission.MODIFY_PHONE_STATE
-    })
+    @RequiresPermission(android.Manifest.permission.MODIFY_PHONE_STATE)
     private void processKeyPressed(BluetoothDevice device) {
         if (mSystemInterface.isRinging()) {
             mSystemInterface.answerCall(device);
@@ -1981,7 +1965,8 @@ public class HeadsetStateMachine extends StateMachine {
         intent.putExtra(BluetoothHeadset.EXTRA_HF_INDICATORS_IND_ID, indId);
         intent.putExtra(BluetoothHeadset.EXTRA_HF_INDICATORS_IND_VALUE, indValue);
 
-        mHeadsetService.sendBroadcast(intent, BLUETOOTH_CONNECT);
+        mHeadsetService.sendBroadcast(intent, BLUETOOTH_CONNECT,
+                Utils.getTempAllowlistBroadcastOptions());
     }
 
     private void processAtBind(String atString, BluetoothDevice device) {
