@@ -27,15 +27,16 @@ import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.IBluetoothCallback;
 import android.content.AttributionSource;
-import android.content.AttributionSourceState;
 import android.content.Context;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.PermissionInfo;
 import android.content.res.Resources;
 import android.media.AudioManager;
+import android.os.AsyncTask;
 import android.os.Binder;
 import android.os.Bundle;
+import android.os.Handler;
 import android.os.Looper;
 import android.os.PowerManager;
 import android.os.Process;
@@ -95,7 +96,6 @@ public class AdapterServiceTest {
     private @Mock Binder mBinder;
     private @Mock AudioManager mAudioManager;
     private @Mock android.app.Application mApplication;
-    private @Mock PermissionCheckerManager mMockPermissionCheckerManager;
 
     private static final int CONTEXT_SWITCH_MS = 100;
     private static final int PROFILE_SERVICE_TOGGLE_TIME_MS = 200;
@@ -136,6 +136,12 @@ public class AdapterServiceTest {
             Looper.prepare();
         }
         Assert.assertNotNull(Looper.myLooper());
+
+        // Dispatch all async work through instrumentation so we can wait until
+        // it's drained below
+        AsyncTask.setDefaultExecutor((r) -> {
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(r);
+        });
 
         InstrumentationRegistry.getInstrumentation().runOnMainSync(
                 () -> mAdapterService = new AdapterService());
@@ -192,16 +198,11 @@ public class AdapterServiceTest {
 
         // Attach a context to the service for permission checks.
         mAdapterService.attach(mMockContext, null, null, null, mApplication, null);
-
         mAdapterService.onCreate();
-        doReturn(Context.PERMISSION_CHECKER_SERVICE).when(mMockContext)
-                .getSystemServiceName(PermissionCheckerManager.class);
-        when(mMockContext.getSystemService(Context.PERMISSION_CHECKER_SERVICE))
-                .thenReturn(mMockPermissionCheckerManager);
-        when(mMockPermissionCheckerManager.checkPermission(anyString(),
-                any(AttributionSourceState.class),
-                anyString(), anyBoolean(), anyBoolean(),
-                anyBoolean(), anyInt())).thenReturn(PackageManager.PERMISSION_GRANTED);
+
+        // Wait for any async events to drain
+        InstrumentationRegistry.getInstrumentation().waitForIdleSync();
+
         mServiceBinder.registerCallback(mIBluetoothCallback, mAttributionSource);
 
         Config.init(mMockContext);
