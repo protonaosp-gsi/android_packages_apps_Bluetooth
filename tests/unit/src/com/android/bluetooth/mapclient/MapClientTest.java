@@ -68,12 +68,13 @@ public class MapClientTest {
                 mTargetContext.getResources().getBoolean(R.bool.profile_supported_mapmce));
         MockitoAnnotations.initMocks(this);
         TestUtils.setAdapterService(mAdapterService);
+        when(mAdapterService.getDatabase()).thenReturn(mDatabaseManager);
+        doReturn(true, false).when(mAdapterService).isStartedProfile(anyString());
         MapUtils.setMnsService(mMockMnsService);
         TestUtils.startService(mServiceRule, MapClientService.class);
         mService = MapClientService.getMapClientService();
         Assert.assertNotNull(mService);
         mAdapter = BluetoothAdapter.getDefaultAdapter();
-        when(mAdapterService.getDatabase()).thenReturn(mDatabaseManager);
     }
 
     @After

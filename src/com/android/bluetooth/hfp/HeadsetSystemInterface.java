@@ -18,21 +18,19 @@ package com.android.bluetooth.hfp;
 
 import android.annotation.NonNull;
 import android.annotation.Nullable;
+import android.annotation.RequiresPermission;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothHeadset;
-import android.bluetooth.IBluetoothHeadsetPhone;
+import com.android.bluetooth.telephony.BluetoothInCallService;
 import android.content.ActivityNotFoundException;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
-import android.content.ServiceConnection;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.media.AudioManager;
-import android.os.IBinder;
 import android.os.PowerManager;
-import android.os.RemoteException;
 import android.util.Log;
 
 import com.android.internal.annotations.VisibleForTesting;
@@ -52,28 +50,6 @@ public class HeadsetSystemInterface {
     private final AudioManager mAudioManager;
     private final HeadsetPhoneState mHeadsetPhoneState;
     private PowerManager.WakeLock mVoiceRecognitionWakeLock;
-    private volatile IBluetoothHeadsetPhone mPhoneProxy;
-    private final ServiceConnection mPhoneProxyConnection = new ServiceConnection() {
-        @Override
-        public void onServiceConnected(ComponentName className, IBinder service) {
-            if (DBG) {
-                Log.d(TAG, "Proxy object connected");
-            }
-            synchronized (HeadsetSystemInterface.this) {
-                mPhoneProxy = IBluetoothHeadsetPhone.Stub.asInterface(service);
-            }
-        }
-
-        @Override
-        public void onServiceDisconnected(ComponentName className) {
-            if (DBG) {
-                Log.d(TAG, "Proxy object disconnected");
-            }
-            synchronized (HeadsetSystemInterface.this) {
-                mPhoneProxy = null;
-            }
-        }
-    };
 
     HeadsetSystemInterface(HeadsetService headsetService) {
         if (headsetService == null) {
@@ -86,21 +62,11 @@ public class HeadsetSystemInterface {
         mVoiceRecognitionWakeLock =
                 powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, TAG + ":VoiceRecognition");
         mVoiceRecognitionWakeLock.setReferenceCounted(false);
-        mHeadsetPhoneState = new HeadsetPhoneState(mHeadsetService);
+        mHeadsetPhoneState = new com.android.bluetooth.hfp.HeadsetPhoneState(mHeadsetService);
     }
 
-    /**
-     * Initialize this system interface
-     */
-    public synchronized void init() {
-        // Bind to Telecom phone proxy service
-        Intent intent = new Intent(IBluetoothHeadsetPhone.class.getName());
-        intent.setComponent(resolveSystemService(mHeadsetService.getPackageManager(), 0, intent));
-        if (intent.getComponent() == null || !mHeadsetService.bindService(intent,
-                mPhoneProxyConnection, 0)) {
-            // Crash the stack if cannot bind to Telecom
-            Log.wtf(TAG, "Could not bind to IBluetoothHeadsetPhone Service, intent=" + intent);
-        }
+    private BluetoothInCallService getBluetoothInCallServiceInstance() {
+        return BluetoothInCallService.getInstance();
     }
 
     /**
@@ -140,14 +106,6 @@ public class HeadsetSystemInterface {
      * Stop this system interface
      */
     public synchronized void stop() {
-        if (mPhoneProxy != null) {
-            if (DBG) {
-                Log.d(TAG, "Unbinding phone proxy");
-            }
-            mPhoneProxy = null;
-            // Synchronization should make sure unbind can be successful
-            mHeadsetService.unbindService(mPhoneProxyConnection);
-        }
         mHeadsetPhoneState.cleanup();
     }
 
@@ -188,19 +146,16 @@ public class HeadsetSystemInterface {
      * @param device the Bluetooth device used for answering this call
      */
     @VisibleForTesting
+    @RequiresPermission(android.Manifest.permission.MODIFY_PHONE_STATE)
     public void answerCall(BluetoothDevice device) {
         if (device == null) {
             Log.w(TAG, "answerCall device is null");
             return;
         }
-
-        if (mPhoneProxy != null) {
-            try {
-                mHeadsetService.setActiveDevice(device);
-                mPhoneProxy.answerCall();
-            } catch (RemoteException e) {
-                Log.e(TAG, Log.getStackTraceString(new Throwable()));
-            }
+        BluetoothInCallService bluetoothInCallService = getBluetoothInCallServiceInstance();
+        if (bluetoothInCallService != null) {
+            mHeadsetService.setActiveDevice(device);
+            bluetoothInCallService.answerCall();
         } else {
             Log.e(TAG, "Handsfree phone proxy null for answering call");
         }
@@ -212,6 +167,7 @@ public class HeadsetSystemInterface {
      * @param device the Bluetooth device used for hanging up this call
      */
     @VisibleForTesting
+    @RequiresPermission(android.Manifest.permission.MODIFY_PHONE_STATE)
     public void hangupCall(BluetoothDevice device) {
         if (device == null) {
             Log.w(TAG, "hangupCall device is null");
@@ -222,12 +178,9 @@ public class HeadsetSystemInterface {
         if (mHeadsetService.isVirtualCallStarted()) {
             mHeadsetService.stopScoUsingVirtualVoiceCall();
         } else {
-            if (mPhoneProxy != null) {
-                try {
-                    mPhoneProxy.hangupCall();
-                } catch (RemoteException e) {
-                    Log.e(TAG, Log.getStackTraceString(new Throwable()));
-                }
+            BluetoothInCallService bluetoothInCallService = getBluetoothInCallServiceInstance();
+            if (bluetoothInCallService != null) {
+                bluetoothInCallService.hangupCall();
             } else {
                 Log.e(TAG, "Handsfree phone proxy null for hanging up call");
             }
@@ -241,17 +194,15 @@ public class HeadsetSystemInterface {
      * @param device the Bluetooth device that sent this code
      */
     @VisibleForTesting
+    @RequiresPermission(android.Manifest.permission.MODIFY_PHONE_STATE)
     public boolean sendDtmf(int dtmf, BluetoothDevice device) {
         if (device == null) {
             Log.w(TAG, "sendDtmf device is null");
             return false;
         }
-        if (mPhoneProxy != null) {
-            try {
-                return mPhoneProxy.sendDtmf(dtmf);
-            } catch (RemoteException e) {
-                Log.e(TAG, Log.getStackTraceString(new Throwable()));
-            }
+        BluetoothInCallService bluetoothInCallService = getBluetoothInCallServiceInstance();
+        if (bluetoothInCallService != null) {
+            return bluetoothInCallService.sendDtmf(dtmf);
         } else {
             Log.e(TAG, "Handsfree phone proxy null for sending DTMF");
         }
@@ -264,13 +215,11 @@ public class HeadsetSystemInterface {
      * @param chld index of the call to hold
      */
     @VisibleForTesting
+    @RequiresPermission(android.Manifest.permission.MODIFY_PHONE_STATE)
     public boolean processChld(int chld) {
-        if (mPhoneProxy != null) {
-            try {
-                return mPhoneProxy.processChld(chld);
-            } catch (RemoteException e) {
-                Log.e(TAG, Log.getStackTraceString(new Throwable()));
-            }
+        BluetoothInCallService bluetoothInCallService = getBluetoothInCallServiceInstance();
+        if (bluetoothInCallService != null) {
+            return bluetoothInCallService.processChld(chld);
         } else {
             Log.e(TAG, "Handsfree phone proxy null for sending DTMF");
         }
@@ -283,20 +232,15 @@ public class HeadsetSystemInterface {
      * @return null on error, empty string if not available
      */
     @VisibleForTesting
+    @RequiresPermission(android.Manifest.permission.MODIFY_PHONE_STATE)
     public String getNetworkOperator() {
-        final IBluetoothHeadsetPhone phoneProxy = mPhoneProxy;
-        if (phoneProxy == null) {
-            Log.e(TAG, "getNetworkOperator() failed: mPhoneProxy is null");
+        BluetoothInCallService bluetoothInCallService = getBluetoothInCallServiceInstance();
+        if (bluetoothInCallService == null) {
+            Log.e(TAG, "getNetworkOperator() failed: mBluetoothInCallService is null");
             return null;
         }
-        try {
-            // Should never return null
-            return mPhoneProxy.getNetworkOperator();
-        } catch (RemoteException exception) {
-            Log.e(TAG, "getNetworkOperator() failed: " + exception.getMessage());
-            exception.printStackTrace();
-            return null;
-        }
+        // Should never return null
+        return bluetoothInCallService.getNetworkOperator();
     }
 
     /**
@@ -305,19 +249,14 @@ public class HeadsetSystemInterface {
      * @return null if unavailable
      */
     @VisibleForTesting
+    @RequiresPermission(android.Manifest.permission.MODIFY_PHONE_STATE)
     public String getSubscriberNumber() {
-        final IBluetoothHeadsetPhone phoneProxy = mPhoneProxy;
-        if (phoneProxy == null) {
-            Log.e(TAG, "getSubscriberNumber() failed: mPhoneProxy is null");
+        BluetoothInCallService bluetoothInCallService = getBluetoothInCallServiceInstance();
+        if (bluetoothInCallService == null) {
+            Log.e(TAG, "getSubscriberNumber() failed: mBluetoothInCallService is null");
             return null;
         }
-        try {
-            return mPhoneProxy.getSubscriberNumber();
-        } catch (RemoteException exception) {
-            Log.e(TAG, "getSubscriberNumber() failed: " + exception.getMessage());
-            exception.printStackTrace();
-            return null;
-        }
+        return bluetoothInCallService.getSubscriberNumber();
     }
 
 
@@ -328,19 +267,14 @@ public class HeadsetSystemInterface {
      * @return
      */
     @VisibleForTesting
+    @RequiresPermission(android.Manifest.permission.MODIFY_PHONE_STATE)
     public boolean listCurrentCalls() {
-        final IBluetoothHeadsetPhone phoneProxy = mPhoneProxy;
-        if (phoneProxy == null) {
-            Log.e(TAG, "listCurrentCalls() failed: mPhoneProxy is null");
+        BluetoothInCallService bluetoothInCallService = getBluetoothInCallServiceInstance();
+        if (bluetoothInCallService == null) {
+            Log.e(TAG, "listCurrentCalls() failed: mBluetoothInCallService is null");
             return false;
         }
-        try {
-            return mPhoneProxy.listCurrentCalls();
-        } catch (RemoteException exception) {
-            Log.e(TAG, "listCurrentCalls() failed: " + exception.getMessage());
-            exception.printStackTrace();
-            return false;
-        }
+        return bluetoothInCallService.listCurrentCalls();
     }
 
     /**
@@ -348,14 +282,11 @@ public class HeadsetSystemInterface {
      * through {@link BluetoothHeadset#phoneStateChanged(int, int, int, String, int)}
      */
     @VisibleForTesting
+    @RequiresPermission(android.Manifest.permission.MODIFY_PHONE_STATE)
     public void queryPhoneState() {
-        final IBluetoothHeadsetPhone phoneProxy = mPhoneProxy;
-        if (phoneProxy != null) {
-            try {
-                mPhoneProxy.queryPhoneState();
-            } catch (RemoteException e) {
-                Log.e(TAG, Log.getStackTraceString(new Throwable()));
-            }
+        BluetoothInCallService bluetoothInCallService = getBluetoothInCallServiceInstance();
+        if (bluetoothInCallService != null) {
+            bluetoothInCallService.queryPhoneState();
         } else {
             Log.e(TAG, "Handsfree phone proxy null for query phone state");
         }
