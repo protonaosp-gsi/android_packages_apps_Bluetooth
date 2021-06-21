@@ -16,6 +16,9 @@
 
 package com.android.bluetooth.hid;
 
+import static android.Manifest.permission.BLUETOOTH_CONNECT;
+
+import android.annotation.RequiresPermission;
 import android.app.ActivityManager;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothHidDevice;
@@ -24,6 +27,7 @@ import android.bluetooth.BluetoothHidDeviceAppSdpSettings;
 import android.bluetooth.BluetoothProfile;
 import android.bluetooth.IBluetoothHidDevice;
 import android.bluetooth.IBluetoothHidDeviceCallback;
+import android.content.AttributionSource;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Binder;
@@ -39,6 +43,7 @@ import com.android.bluetooth.Utils;
 import com.android.bluetooth.btservice.AdapterService;
 import com.android.bluetooth.btservice.MetricsLogger;
 import com.android.bluetooth.btservice.ProfileService;
+import com.android.bluetooth.btservice.storage.DatabaseManager;
 import com.android.internal.annotations.VisibleForTesting;
 
 import java.nio.ByteBuffer;
@@ -46,6 +51,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.NoSuchElementException;
+import java.util.Objects;
 
 /** @hide */
 public class HidDeviceService extends ProfileService {
@@ -66,6 +72,7 @@ public class HidDeviceService extends ProfileService {
 
     private static HidDeviceService sHidDeviceService;
 
+    private DatabaseManager mDatabaseManager;
     private HidDeviceNativeInterface mHidDeviceNativeInterface;
 
     private boolean mNativeAvailable = false;
@@ -292,28 +299,25 @@ public class HidDeviceService extends ProfileService {
             mService = null;
         }
 
-        private HidDeviceService getService() {
-            if (!Utils.checkCaller()) {
-                Log.w(TAG, "HidDevice call not allowed for non-active user");
+        @RequiresPermission(android.Manifest.permission.BLUETOOTH_CONNECT)
+        private HidDeviceService getService(AttributionSource source) {
+            if (!Utils.checkCallerIsSystemOrActiveUser(TAG)
+                    || !Utils.checkServiceAvailable(mService, TAG)
+                    || !Utils.checkConnectPermissionForDataDelivery(mService, source, TAG)) {
                 return null;
             }
-
-            if (mService != null && mService.isAvailable()) {
-                return mService;
-            }
-
-            return null;
+            return mService;
         }
 
         @Override
         public boolean registerApp(BluetoothHidDeviceAppSdpSettings sdp,
                 BluetoothHidDeviceAppQosSettings inQos, BluetoothHidDeviceAppQosSettings outQos,
-                IBluetoothHidDeviceCallback callback) {
+                IBluetoothHidDeviceCallback callback, AttributionSource source) {
             if (DBG) {
                 Log.d(TAG, "registerApp()");
             }
 
-            HidDeviceService service = getService();
+            HidDeviceService service = getService(source);
             if (service == null) {
                 return false;
             }
@@ -322,12 +326,12 @@ public class HidDeviceService extends ProfileService {
         }
 
         @Override
-        public boolean unregisterApp() {
+        public boolean unregisterApp(AttributionSource source) {
             if (DBG) {
                 Log.d(TAG, "unregisterApp()");
             }
 
-            HidDeviceService service = getService();
+            HidDeviceService service = getService(source);
             if (service == null) {
                 return false;
             }
@@ -336,12 +340,13 @@ public class HidDeviceService extends ProfileService {
         }
 
         @Override
-        public boolean sendReport(BluetoothDevice device, int id, byte[] data) {
+        public boolean sendReport(BluetoothDevice device, int id, byte[] data,
+                AttributionSource source) {
             if (DBG) {
                 Log.d(TAG, "sendReport(): device=" + device + "  id=" + id);
             }
 
-            HidDeviceService service = getService();
+            HidDeviceService service = getService(source);
             if (service == null) {
                 return false;
             }
@@ -350,12 +355,13 @@ public class HidDeviceService extends ProfileService {
         }
 
         @Override
-        public boolean replyReport(BluetoothDevice device, byte type, byte id, byte[] data) {
+        public boolean replyReport(BluetoothDevice device, byte type, byte id, byte[] data,
+                AttributionSource source) {
             if (DBG) {
                 Log.d(TAG, "replyReport(): device=" + device + " type=" + type + " id=" + id);
             }
 
-            HidDeviceService service = getService();
+            HidDeviceService service = getService(source);
             if (service == null) {
                 return false;
             }
@@ -364,12 +370,12 @@ public class HidDeviceService extends ProfileService {
         }
 
         @Override
-        public boolean unplug(BluetoothDevice device) {
+        public boolean unplug(BluetoothDevice device, AttributionSource source) {
             if (DBG) {
                 Log.d(TAG, "unplug(): device=" + device);
             }
 
-            HidDeviceService service = getService();
+            HidDeviceService service = getService(source);
             if (service == null) {
                 return false;
             }
@@ -378,12 +384,12 @@ public class HidDeviceService extends ProfileService {
         }
 
         @Override
-        public boolean connect(BluetoothDevice device) {
+        public boolean connect(BluetoothDevice device, AttributionSource source) {
             if (DBG) {
                 Log.d(TAG, "connect(): device=" + device);
             }
 
-            HidDeviceService service = getService();
+            HidDeviceService service = getService(source);
             if (service == null) {
                 return false;
             }
@@ -392,12 +398,12 @@ public class HidDeviceService extends ProfileService {
         }
 
         @Override
-        public boolean disconnect(BluetoothDevice device) {
+        public boolean disconnect(BluetoothDevice device, AttributionSource source) {
             if (DBG) {
                 Log.d(TAG, "disconnect(): device=" + device);
             }
 
-            HidDeviceService service = getService();
+            HidDeviceService service = getService(source);
             if (service == null) {
                 return false;
             }
@@ -406,13 +412,14 @@ public class HidDeviceService extends ProfileService {
         }
 
         @Override
-        public boolean setConnectionPolicy(BluetoothDevice device, int connectionPolicy) {
+        public boolean setConnectionPolicy(BluetoothDevice device, int connectionPolicy,
+                AttributionSource source) {
             if (DBG) {
                 Log.d(TAG, "setConnectionPolicy(): device=" + device + " connectionPolicy="
                         + connectionPolicy);
             }
 
-            HidDeviceService service = getService();
+            HidDeviceService service = getService(source);
             if (service == null) {
                 return false;
             }
@@ -421,12 +428,12 @@ public class HidDeviceService extends ProfileService {
         }
 
         @Override
-        public boolean reportError(BluetoothDevice device, byte error) {
+        public boolean reportError(BluetoothDevice device, byte error, AttributionSource source) {
             if (DBG) {
                 Log.d(TAG, "reportError(): device=" + device + " error=" + error);
             }
 
-            HidDeviceService service = getService();
+            HidDeviceService service = getService(source);
             if (service == null) {
                 return false;
             }
@@ -435,12 +442,12 @@ public class HidDeviceService extends ProfileService {
         }
 
         @Override
-        public int getConnectionState(BluetoothDevice device) {
+        public int getConnectionState(BluetoothDevice device, AttributionSource source) {
             if (DBG) {
                 Log.d(TAG, "getConnectionState(): device=" + device);
             }
 
-            HidDeviceService service = getService();
+            HidDeviceService service = getService(source);
             if (service == null) {
                 return BluetoothHidDevice.STATE_DISCONNECTED;
             }
@@ -449,22 +456,25 @@ public class HidDeviceService extends ProfileService {
         }
 
         @Override
-        public List<BluetoothDevice> getConnectedDevices() {
+        public List<BluetoothDevice> getConnectedDevices(AttributionSource source) {
             if (DBG) {
                 Log.d(TAG, "getConnectedDevices()");
             }
 
-            return getDevicesMatchingConnectionStates(new int[]{BluetoothProfile.STATE_CONNECTED});
+            return getDevicesMatchingConnectionStates(new int[] {
+                    BluetoothProfile.STATE_CONNECTED
+            }, source);
         }
 
         @Override
-        public List<BluetoothDevice> getDevicesMatchingConnectionStates(int[] states) {
+        public List<BluetoothDevice> getDevicesMatchingConnectionStates(int[] states,
+                AttributionSource source) {
             if (DBG) {
                 Log.d(TAG,
                         "getDevicesMatchingConnectionStates(): states=" + Arrays.toString(states));
             }
 
-            HidDeviceService service = getService();
+            HidDeviceService service = getService(source);
             if (service == null) {
                 return new ArrayList<BluetoothDevice>(0);
             }
@@ -473,8 +483,8 @@ public class HidDeviceService extends ProfileService {
         }
 
         @Override
-        public String getUserAppName() {
-            HidDeviceService service = getService();
+        public String getUserAppName(AttributionSource source) {
+            HidDeviceService service = getService(source);
             if (service == null) {
                 return "";
             }
@@ -507,7 +517,6 @@ public class HidDeviceService extends ProfileService {
     synchronized boolean registerApp(BluetoothHidDeviceAppSdpSettings sdp,
             BluetoothHidDeviceAppQosSettings inQos, BluetoothHidDeviceAppQosSettings outQos,
             IBluetoothHidDeviceCallback callback) {
-        enforceCallingOrSelfPermission(BLUETOOTH_ADMIN_PERM, "Need BLUETOOTH ADMIN permission");
         if (mUserUid != 0) {
             Log.w(TAG, "registerApp(): failed because another app is registered");
             return false;
@@ -554,7 +563,6 @@ public class HidDeviceService extends ProfileService {
     }
 
     synchronized boolean unregisterApp() {
-        enforceCallingOrSelfPermission(BLUETOOTH_ADMIN_PERM, "Need BLUETOOTH ADMIN permission");
         if (DBG) {
             Log.d(TAG, "unregisterApp()");
         }
@@ -579,7 +587,6 @@ public class HidDeviceService extends ProfileService {
     }
 
     synchronized boolean sendReport(BluetoothDevice device, int id, byte[] data) {
-        enforceCallingOrSelfPermission(BLUETOOTH_ADMIN_PERM, "Need BLUETOOTH ADMIN permission");
         if (DBG) {
             Log.d(TAG, "sendReport(): device=" + device + " id=" + id);
         }
@@ -589,7 +596,6 @@ public class HidDeviceService extends ProfileService {
     }
 
     synchronized boolean replyReport(BluetoothDevice device, byte type, byte id, byte[] data) {
-        enforceCallingOrSelfPermission(BLUETOOTH_ADMIN_PERM, "Need BLUETOOTH ADMIN permission");
         if (DBG) {
             Log.d(TAG, "replyReport(): device=" + device + " type=" + type + " id=" + id);
         }
@@ -599,7 +605,6 @@ public class HidDeviceService extends ProfileService {
     }
 
     synchronized boolean unplug(BluetoothDevice device) {
-        enforceCallingOrSelfPermission(BLUETOOTH_ADMIN_PERM, "Need BLUETOOTH ADMIN permission");
         if (DBG) {
             Log.d(TAG, "unplug(): device=" + device);
         }
@@ -615,7 +620,6 @@ public class HidDeviceService extends ProfileService {
      * @return true if the connection is successful, false otherwise
      */
     public synchronized boolean connect(BluetoothDevice device) {
-        enforceCallingOrSelfPermission(BLUETOOTH_ADMIN_PERM, "Need BLUETOOTH ADMIN permission");
         if (DBG) {
             Log.d(TAG, "connect(): device=" + device);
         }
@@ -630,7 +634,6 @@ public class HidDeviceService extends ProfileService {
      * @return true if the disconnection is successful, false otherwise
      */
     public synchronized boolean disconnect(BluetoothDevice device) {
-        enforceCallingOrSelfPermission(BLUETOOTH_ADMIN_PERM, "Need BLUETOOTH ADMIN permission");
         if (DBG) {
             Log.d(TAG, "disconnect(): device=" + device);
         }
@@ -658,19 +661,22 @@ public class HidDeviceService extends ProfileService {
      * @param connectionPolicy determines whether hid device should be connected or disconnected
      * @return true if hid device is connected or disconnected, false otherwise
      */
+    @RequiresPermission(android.Manifest.permission.BLUETOOTH_PRIVILEGED)
     public boolean setConnectionPolicy(BluetoothDevice device, int connectionPolicy) {
         enforceCallingOrSelfPermission(
                 BLUETOOTH_PRIVILEGED, "Need BLUETOOTH_PRIVILEGED permission");
         if (DBG) {
             Log.d(TAG, "Saved connectionPolicy " + device + " = " + connectionPolicy);
         }
-        AdapterService.getAdapterService().getDatabase()
-                .setProfileConnectionPolicy(device, BluetoothProfile.HID_DEVICE, connectionPolicy);
+
+        if (!mDatabaseManager.setProfileConnectionPolicy(device, BluetoothProfile.HID_DEVICE,
+                  connectionPolicy)) {
+            return false;
+        }
         if (connectionPolicy == BluetoothProfile.CONNECTION_POLICY_FORBIDDEN) {
             disconnect(device);
-            return true;
         }
-        return false;
+        return true;
     }
 
     /**
@@ -685,18 +691,18 @@ public class HidDeviceService extends ProfileService {
      * @return connection policy of the device
      * @hide
      */
+    @RequiresPermission(android.Manifest.permission.BLUETOOTH_PRIVILEGED)
     public int getConnectionPolicy(BluetoothDevice device) {
         if (device == null) {
             throw new IllegalArgumentException("Null device");
         }
         enforceCallingOrSelfPermission(
                 BLUETOOTH_PRIVILEGED, "Need BLUETOOTH_PRIVILEGED permission");
-        return AdapterService.getAdapterService().getDatabase()
+        return mDatabaseManager
                 .getProfileConnectionPolicy(device, BluetoothProfile.HID_DEVICE);
     }
 
     synchronized boolean reportError(BluetoothDevice device, byte error) {
-        enforceCallingOrSelfPermission(BLUETOOTH_ADMIN_PERM, "Need BLUETOOTH ADMIN permission");
         if (DBG) {
             Log.d(TAG, "reportError(): device=" + device + " error=" + error);
         }
@@ -706,7 +712,6 @@ public class HidDeviceService extends ProfileService {
     }
 
     synchronized String getUserAppName() {
-        enforceCallingOrSelfPermission(BLUETOOTH_PERM, "Need BLUETOOTH permission");
         if (mUserUid < Process.FIRST_APPLICATION_UID) {
             return "";
         }
@@ -719,6 +724,9 @@ public class HidDeviceService extends ProfileService {
         if (DBG) {
             Log.d(TAG, "start()");
         }
+
+        mDatabaseManager = Objects.requireNonNull(AdapterService.getAdapterService().getDatabase(),
+                "DatabaseManager cannot be null when HidDeviceService starts");
 
         mHandler = new HidDeviceServiceHandler();
         mHidDeviceNativeInterface = HidDeviceNativeInterface.getInstance();
@@ -790,7 +798,6 @@ public class HidDeviceService extends ProfileService {
      * {@link BluetoothProfile#STATE_DISCONNECTING}
      */
     public int getConnectionState(BluetoothDevice device) {
-        enforceCallingOrSelfPermission(BLUETOOTH_PERM, "Need BLUETOOTH permission");
         if (mHidDevice != null && mHidDevice.equals(device)) {
             return mHidDeviceState;
         }
@@ -798,7 +805,6 @@ public class HidDeviceService extends ProfileService {
     }
 
     List<BluetoothDevice> getDevicesMatchingConnectionStates(int[] states) {
-        enforceCallingOrSelfPermission(BLUETOOTH_PERM, "Need BLUETOOTH permission");
         List<BluetoothDevice> inputDevices = new ArrayList<BluetoothDevice>();
 
         if (mHidDevice != null) {
@@ -922,7 +928,7 @@ public class HidDeviceService extends ProfileService {
         intent.putExtra(BluetoothProfile.EXTRA_STATE, newState);
         intent.putExtra(BluetoothDevice.EXTRA_DEVICE, device);
         intent.addFlags(Intent.FLAG_RECEIVER_REGISTERED_ONLY_BEFORE_BOOT);
-        sendBroadcast(intent, BLUETOOTH_PERM);
+        sendBroadcast(intent, BLUETOOTH_CONNECT, Utils.getTempAllowlistBroadcastOptions());
     }
 
     private static int convertHalState(int halState) {
