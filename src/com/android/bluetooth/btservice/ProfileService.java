@@ -16,6 +16,9 @@
 
 package com.android.bluetooth.btservice;
 
+import static android.Manifest.permission.BLUETOOTH_CONNECT;
+
+import android.annotation.SuppressLint;
 import android.app.ActivityManager;
 import android.app.Service;
 import android.bluetooth.BluetoothAdapter;
@@ -39,8 +42,6 @@ import com.android.bluetooth.Utils;
 public abstract class ProfileService extends Service {
     private static final boolean DBG = false;
 
-    public static final String BLUETOOTH_ADMIN_PERM = android.Manifest.permission.BLUETOOTH_ADMIN;
-    public static final String BLUETOOTH_PERM = android.Manifest.permission.BLUETOOTH;
     public static final String BLUETOOTH_PRIVILEGED =
             android.Manifest.permission.BLUETOOTH_PRIVILEGED;
 
@@ -60,13 +61,18 @@ public abstract class ProfileService extends Service {
     private AdapterService mAdapterService;
     private BroadcastReceiver mUserSwitchedReceiver;
     private boolean mProfileStarted = false;
+    private volatile boolean mTestModeEnabled = false;
 
     public String getName() {
         return getClass().getSimpleName();
     }
 
-    protected boolean isAvailable() {
+    public boolean isAvailable() {
         return mProfileStarted;
+    }
+
+    protected boolean isTestModeEnabled() {
+        return mTestModeEnabled;
     }
 
     /**
@@ -79,6 +85,8 @@ public abstract class ProfileService extends Service {
     /**
      * Called in {@link #onCreate()} to init basic stuff in this service
      */
+    // Suppressed since this is called from framework
+    @SuppressLint("AndroidFrameworkRequiresPermission")
     protected void create() {}
 
     /**
@@ -86,6 +94,8 @@ public abstract class ProfileService extends Service {
      *
      * @return True in successful condition, False otherwise
      */
+    // Suppressed since this is called from framework
+    @SuppressLint("AndroidFrameworkRequiresPermission")
     protected abstract boolean start();
 
     /**
@@ -93,28 +103,47 @@ public abstract class ProfileService extends Service {
      *
      * @return True in successful condition, False otherwise
      */
+    // Suppressed since this is called from framework
+    @SuppressLint("AndroidFrameworkRequiresPermission")
     protected abstract boolean stop();
 
     /**
      * Called in {@link #onDestroy()} when this object is completely discarded
      */
+    // Suppressed since this is called from framework
+    @SuppressLint("AndroidFrameworkRequiresPermission")
     protected void cleanup() {}
 
     /**
      * @param userId is equivalent to the result of ActivityManager.getCurrentUser()
      */
+    // Suppressed since this is called from framework
+    @SuppressLint("AndroidFrameworkRequiresPermission")
     protected void setCurrentUser(int userId) {}
 
     /**
      * @param userId is equivalent to the result of ActivityManager.getCurrentUser()
      */
+    // Suppressed since this is called from framework
+    @SuppressLint("AndroidFrameworkRequiresPermission")
     protected void setUserUnlocked(int userId) {}
+
+    /**
+     * @param testEnabled if the profile should enter or exit a testing mode
+     */
+    // Suppressed since this is called from framework
+    @SuppressLint("AndroidFrameworkRequiresPermission")
+    protected void setTestModeEnabled(boolean testModeEnabled) {
+        mTestModeEnabled = testModeEnabled;
+    }
 
     protected ProfileService() {
         mName = getName();
     }
 
     @Override
+    // Suppressed since this is called from framework
+    @SuppressLint("AndroidFrameworkRequiresPermission")
     public void onCreate() {
         if (DBG) {
             Log.d(mName, "onCreate");
@@ -126,12 +155,14 @@ public abstract class ProfileService extends Service {
     }
 
     @Override
+    // Suppressed since this is called from framework
+    @SuppressLint("AndroidFrameworkRequiresPermission")
     public int onStartCommand(Intent intent, int flags, int startId) {
         if (DBG) {
             Log.d(mName, "onStartCommand()");
         }
 
-        if (checkCallingOrSelfPermission(BLUETOOTH_ADMIN_PERM)
+        if (checkCallingOrSelfPermission(BLUETOOTH_CONNECT)
                 != PackageManager.PERMISSION_GRANTED) {
             Log.e(mName, "Permission denied!");
             return PROFILE_SERVICE_MODE;
@@ -155,6 +186,8 @@ public abstract class ProfileService extends Service {
     }
 
     @Override
+    // Suppressed since this is called from framework
+    @SuppressLint("AndroidFrameworkRequiresPermission")
     public IBinder onBind(Intent intent) {
         if (DBG) {
             Log.d(mName, "onBind");
@@ -167,6 +200,8 @@ public abstract class ProfileService extends Service {
     }
 
     @Override
+    // Suppressed since this is called from framework
+    @SuppressLint("AndroidFrameworkRequiresPermission")
     public boolean onUnbind(Intent intent) {
         if (DBG) {
             Log.d(mName, "onUnbind");
@@ -179,6 +214,8 @@ public abstract class ProfileService extends Service {
      *
      * @param sb StringBuilder from the profile.
      */
+    // Suppressed since this is called from framework
+    @SuppressLint("AndroidFrameworkRequiresPermission")
     public void dump(StringBuilder sb) {
         sb.append("\nProfile: ");
         sb.append(mName);
@@ -190,6 +227,8 @@ public abstract class ProfileService extends Service {
      *
      * @param builder metrics proto builder
      */
+    // Suppressed since this is called from framework
+    @SuppressLint("AndroidFrameworkRequiresPermission")
     public void dumpProto(BluetoothMetricsProto.BluetoothLog.Builder builder) {
         // Do nothing
     }
@@ -207,6 +246,8 @@ public abstract class ProfileService extends Service {
     }
 
     @Override
+    // Suppressed since this is called from framework
+    @SuppressLint("AndroidFrameworkRequiresPermission")
     public void onDestroy() {
         cleanup();
         if (mBinder != null) {
@@ -226,6 +267,10 @@ public abstract class ProfileService extends Service {
         mAdapterService = AdapterService.getAdapterService();
         if (mAdapterService == null) {
             Log.w(mName, "Could not add this profile because AdapterService is null.");
+            return;
+        }
+        if (!mAdapterService.isStartedProfile(mName)) {
+            Log.w(mName, "Unexpectedly do Start, don't start");
             return;
         }
         mAdapterService.addProfile(this);
@@ -269,6 +314,10 @@ public abstract class ProfileService extends Service {
     }
 
     private void doStop() {
+        if (mAdapterService == null || mAdapterService.isStartedProfile(mName)) {
+            Log.w(mName, "Unexpectedly do Stop, don't stop.");
+            return;
+        }
         if (!mProfileStarted) {
             Log.w(mName, "doStop() called, but the profile is not running.");
         }
