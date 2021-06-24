@@ -43,9 +43,9 @@ import android.telephony.TelephonyManager;
 import android.text.TextUtils;
 import android.util.Log;
 
-import com.android.bluetooth.hfp.BluetoothHeadsetProxy;
-
 import androidx.annotation.VisibleForTesting;
+
+import com.android.bluetooth.hfp.BluetoothHeadsetProxy;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -107,10 +107,10 @@ public class BluetoothInCallService extends InCallService {
     public TelecomManager mTelecomManager;
 
     @VisibleForTesting
-    public final HashMap<String, CallStateCallback> mCallbacks = new HashMap<>();
+    public final HashMap<Integer, CallStateCallback> mCallbacks = new HashMap<>();
 
     @VisibleForTesting
-    public final HashMap<String, BluetoothCall> mBluetoothCallHashMap = new HashMap<>();
+    public final HashMap<Integer, BluetoothCall> mBluetoothCallHashMap = new HashMap<>();
 
     // A map from Calls to indexes used to identify calls for CLCC (C* List Current Calls).
     private final Map<BluetoothCall, Integer> mClccIndexMap = new HashMap<>();
@@ -219,7 +219,7 @@ public class BluetoothInCallService extends InCallService {
         @Override
         public void onStateChanged(Call call, int state) {
             super.onStateChanged(call, state);
-            onStateChanged(getBluetoothCallById(call.getDetails().getTelecomCallId()), state);
+            onStateChanged(getBluetoothCallById(System.identityHashCode(call)), state);
         }
 
         public void onDetailsChanged(BluetoothCall call, Call.Details details) {
@@ -236,7 +236,7 @@ public class BluetoothInCallService extends InCallService {
         @Override
         public void onDetailsChanged(Call call, Call.Details details) {
             super.onDetailsChanged(call, details);
-            onDetailsChanged(getBluetoothCallById(call.getDetails().getTelecomCallId()), details);
+            onDetailsChanged(getBluetoothCallById(System.identityHashCode(call)), details);
         }
 
         public void onParentChanged(BluetoothCall call) {
@@ -257,7 +257,7 @@ public class BluetoothInCallService extends InCallService {
         public void onParentChanged(Call call, Call parent) {
             super.onParentChanged(call, parent);
             onParentChanged(
-                    getBluetoothCallById(call.getDetails().getTelecomCallId()));
+                    getBluetoothCallById(System.identityHashCode(call)));
         }
 
         public void onChildrenChanged(BluetoothCall call, List<BluetoothCall> children) {
@@ -280,7 +280,7 @@ public class BluetoothInCallService extends InCallService {
         public void onChildrenChanged(Call call, List<Call> children) {
             super.onChildrenChanged(call, children);
             onChildrenChanged(
-                    getBluetoothCallById(call.getDetails().getTelecomCallId()),
+                    getBluetoothCallById(System.identityHashCode(call)),
                     getBluetoothCallsByIds(BluetoothCall.getIds(children)));
         }
     }
@@ -346,6 +346,13 @@ public class BluetoothInCallService extends InCallService {
             BluetoothCall call = mCallInfo.getForegroundCall();
             if (mCallInfo.isNullCall(call)) {
                 return false;
+            }
+            // release the parent if there is a conference call
+            BluetoothCall conferenceCall = getBluetoothCallById(call.getParentId());
+            if (!mCallInfo.isNullCall(conferenceCall)
+                    && conferenceCall.getState() == Call.STATE_ACTIVE) {
+                Log.i(TAG, "BT - hanging up conference call");
+                call = conferenceCall;
             }
             call.disconnect();
             return true;
@@ -430,9 +437,13 @@ public class BluetoothInCallService extends InCallService {
     public boolean processChld(int chld) {
         synchronized (LOCK) {
             enforceModifyPermission();
-            long token = Binder.clearCallingIdentity();
-            Log.i(TAG, "processChld " + chld);
-            return _processChld(chld);
+            final long token = Binder.clearCallingIdentity();
+            try {
+                Log.i(TAG, "processChld " + chld);
+                return _processChld(chld);
+            } finally {
+                Binder.restoreCallingIdentity(token);
+            }
         }
     }
 
@@ -440,13 +451,13 @@ public class BluetoothInCallService extends InCallService {
         if (call.isExternalCall()) {
             return;
         }
-        if (!mBluetoothCallHashMap.containsKey(call.getTelecomCallId())) {
+        if (!mBluetoothCallHashMap.containsKey(call.getId())) {
             Log.d(TAG, "onCallAdded");
             CallStateCallback callback = new CallStateCallback(call.getState());
-            mCallbacks.put(call.getTelecomCallId(), callback);
+            mCallbacks.put(call.getId(), callback);
             call.registerCallback(callback);
 
-            mBluetoothCallHashMap.put(call.getTelecomCallId(), call);
+            mBluetoothCallHashMap.put(call.getId(), call);
             updateHeadsetWithCallState(false /* force */);
         }
     }
@@ -495,8 +506,8 @@ public class BluetoothInCallService extends InCallService {
             call.unregisterCallback(callback);
         }
 
-        if (mBluetoothCallHashMap.containsKey(call.getTelecomCallId())) {
-            mBluetoothCallHashMap.remove(call.getTelecomCallId());
+        if (mBluetoothCallHashMap.containsKey(call.getId())) {
+            mBluetoothCallHashMap.remove(call.getId());
         }
 
         mClccIndexMap.remove(call);
@@ -506,7 +517,7 @@ public class BluetoothInCallService extends InCallService {
     @Override
     public void onCallRemoved(Call call) {
         super.onCallRemoved(call);
-        BluetoothCall bluetoothCall = getBluetoothCallById(call.getDetails().getTelecomCallId());
+        BluetoothCall bluetoothCall = getBluetoothCallById(System.identityHashCode(call));
         if (bluetoothCall == null) {
             Log.w(TAG, "onCallRemoved, BluetoothCall is removed before registered");
             return;
@@ -650,7 +661,14 @@ public class BluetoothInCallService extends InCallService {
                             + addressType);
         }
 
-        if (mBluetoothHeadset != null) {
+        if (mBluetoothHeadset == null) {
+            Log.w(TAG, "mBluetoothHeasdset is null when sending clcc for BluetoothCall "
+                    + index + ", "
+                    + direction + ", "
+                    + state + ", "
+                    + isPartOfConference + ", "
+                    + addressType);
+        } else {
             mBluetoothHeadset.clccResponse(
                     index, direction, state, 0, isPartOfConference, address, addressType);
         }
@@ -814,11 +832,11 @@ public class BluetoothInCallService extends InCallService {
                 numHeldCalls = 1;  // Merge is available, so expose via numHeldCalls.
             }
 
-            for (String id : activeCall.getChildrenIds()) {
+            for (Integer id : activeCall.getChildrenIds()) {
                 // Held BluetoothCall has changed due to it being combined into a CDMA conference.
                 // Keep track of this and ignore any future update since it doesn't really count
                 // as a BluetoothCall change.
-                if (mOldHeldCall != null && mOldHeldCall.getTelecomCallId() == id) {
+                if (mOldHeldCall != null && mOldHeldCall.getId() == id) {
                     ignoreHeldCallChange = true;
                     break;
                 }
@@ -951,7 +969,7 @@ public class BluetoothInCallService extends InCallService {
 
     @VisibleForTesting
     public CallStateCallback getCallback(BluetoothCall call) {
-        return mCallbacks.get(call.getTelecomCallId());
+        return mCallbacks.get(call.getId());
     }
 
     @VisibleForTesting
@@ -960,7 +978,7 @@ public class BluetoothInCallService extends InCallService {
     }
 
     @VisibleForTesting
-    public BluetoothCall getBluetoothCallById(String id) {
+    public BluetoothCall getBluetoothCallById(Integer id) {
         if (mBluetoothCallHashMap.containsKey(id)) {
             return mBluetoothCallHashMap.get(id);
         }
@@ -968,9 +986,9 @@ public class BluetoothInCallService extends InCallService {
     }
 
     @VisibleForTesting
-    public List<BluetoothCall> getBluetoothCallsByIds(List<String> ids) {
+    public List<BluetoothCall> getBluetoothCallsByIds(List<Integer> ids) {
         List<BluetoothCall> calls = new ArrayList<>();
-        for (String id : ids) {
+        for (Integer id : ids) {
             BluetoothCall call = getBluetoothCallById(id);
             if (!mCallInfo.isNullCall(call)) {
                 calls.add(call);

@@ -19,6 +19,7 @@ package com.android.bluetooth.gatt;
 import static android.content.pm.PackageManager.PERMISSION_GRANTED;
 
 import android.annotation.Nullable;
+import android.annotation.SuppressLint;
 import android.app.AppOpsManager;
 import android.app.PendingIntent;
 import android.app.Service;
@@ -56,6 +57,7 @@ import android.os.ServiceManager;
 import android.os.SystemClock;
 import android.os.UserHandle;
 import android.os.WorkSource;
+import android.provider.DeviceConfig;
 import android.provider.Settings;
 import android.util.Log;
 
@@ -99,6 +101,11 @@ public class GattService extends ProfileService {
     // Batch scan related constants.
     private static final int TRUNCATED_RESULT_SIZE = 11;
     private static final int TIME_STAMP_LENGTH = 2;
+
+    /**
+     * The default floor value for LE batch scan report delays greater than 0
+     */
+    private static final long DEFAULT_REPORT_DELAY_FLOOR = 5000;
 
     // onFoundLost related constants
     private static final int ADVT_STATE_ONFOUND = 0;
@@ -2073,7 +2080,7 @@ public class GattService extends ProfileService {
         if (mCompanionManager == null) {
             return new ArrayList<String>();
         }
-        long identity = Binder.clearCallingIdentity();
+        final long identity = Binder.clearCallingIdentity();
         try {
             return mCompanionManager.getAssociations(
                     callingPackage, userHandle.getIdentifier());
@@ -2100,6 +2107,8 @@ public class GattService extends ProfileService {
         if (needsPrivilegedPermissionForScan(settings)) {
             enforcePrivilegedPermission();
         }
+        settings = enforceReportDelayFloor(settings);
+        enforcePrivilegedPermissionIfNeeded(filters);
         final ScanClient scanClient = new ScanClient(scannerId, settings, filters, storages);
         scanClient.userHandle = UserHandle.of(UserHandle.getCallingUserId());
         mAppOps.checkPackage(Binder.getCallingUid(), callingPackage);
@@ -2146,6 +2155,8 @@ public class GattService extends ProfileService {
             enforcePrivilegedPermission();
         }
 
+        settings = enforceReportDelayFloor(settings);
+        enforcePrivilegedPermissionIfNeeded(filters);
         UUID uuid = UUID.randomUUID();
         if (DBG) {
             Log.d(TAG, "startScan(PI) - UUID=" + uuid);
@@ -3260,6 +3271,39 @@ public class GattService extends ProfileService {
         return settings.getScanResultType() == ScanSettings.SCAN_RESULT_TYPE_ABBREVIATED;
     }
 
+    /*
+     * The {@link ScanFilter#setDeviceAddress} API overloads are @SystemApi access methods.  This
+     * requires that the permissions be BLUETOOTH_PRIVILEGED.
+     */
+    @SuppressLint("AndroidFrameworkRequiresPermission")
+    private void enforcePrivilegedPermissionIfNeeded(List<ScanFilter> filters) {
+        if (DBG) {
+            Log.d(TAG, "enforcePrivilegedPermissionIfNeeded(" + filters + ")");
+        }
+        // Some 3p API cases may have null filters, need to allow
+        if (filters != null) {
+            for (ScanFilter filter : filters) {
+                // The only case to enforce here is if there is an address
+                // If there is an address, enforce if the correct combination criteria is met.
+                if (filter.getDeviceAddress() != null) {
+                    // At this point we have an address, that means a caller used the
+                    // setDeviceAddress(address) public API for the ScanFilter
+                    // We don't want to enforce if the type is PUBLIC and the IRK is null
+                    // However, if we have a different type that means the caller used a new
+                    // @SystemApi such as setDeviceAddress(address, type) or
+                    // setDeviceAddress(address, type, irk) which are both @SystemApi and require
+                    // permissions to be enforced
+                    if (filter.getAddressType()
+                            == BluetoothDevice.ADDRESS_TYPE_PUBLIC && filter.getIrk() == null) {
+                        // Do not enforce
+                    } else {
+                        enforcePrivilegedPermission();
+                    }
+                }
+            }
+        }
+    }
+
     // Enforce caller has BLUETOOTH_PRIVILEGED permission. A {@link SecurityException} will be
     // thrown if the caller app does not have BLUETOOTH_PRIVILEGED permission.
     private void enforcePrivilegedPermission() {
@@ -3273,6 +3317,44 @@ public class GattService extends ProfileService {
     private void enforceImpersonatationPermission() {
         enforceCallingOrSelfPermission(android.Manifest.permission.UPDATE_DEVICE_STATS,
                 "Need UPDATE_DEVICE_STATS permission");
+    }
+
+    /**
+     * Ensures the report delay is either 0 or at least the floor value (5000ms)
+     *
+     * @param  settings are the scan settings passed into a request to start le scanning
+     * @return the passed in ScanSettings object if the report delay is 0 or above the floor value;
+     *         a new ScanSettings object with the report delay being the floor value if the original
+     *         report delay was between 0 and the floor value (exclusive of both)
+     */
+    private ScanSettings enforceReportDelayFloor(ScanSettings settings) {
+        if (settings.getReportDelayMillis() == 0) {
+            return settings;
+        }
+
+        // Need to clear identity to pass device config permission check
+        final long callerToken = Binder.clearCallingIdentity();
+        try {
+            long floor = DeviceConfig.getLong(DeviceConfig.NAMESPACE_BLUETOOTH, "report_delay",
+                DEFAULT_REPORT_DELAY_FLOOR);
+
+            if (settings.getReportDelayMillis() > floor) {
+                return settings;
+            } else {
+                return new ScanSettings.Builder()
+                        .setCallbackType(settings.getCallbackType())
+                        .setLegacy(settings.getLegacy())
+                        .setMatchMode(settings.getMatchMode())
+                        .setNumOfMatches(settings.getNumOfMatches())
+                        .setPhy(settings.getPhy())
+                        .setReportDelay(floor)
+                        .setScanMode(settings.getScanMode())
+                        .setScanResultType(settings.getScanResultType())
+                        .build();
+            }
+        } finally {
+            Binder.restoreCallingIdentity(callerToken);
+        }
     }
 
     private void stopNextService(int serverIf, int status) throws RemoteException {

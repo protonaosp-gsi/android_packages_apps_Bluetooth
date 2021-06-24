@@ -59,6 +59,7 @@ namespace android {
 
 const jint INVALID_FD = -1;
 
+static jmethodID method_oobDataReceivedCallback;
 static jmethodID method_stateChangeCallback;
 static jmethodID method_adapterPropertyChangedCallback;
 static jmethodID method_devicePropertyChangedCallback;
@@ -401,6 +402,112 @@ static void ssp_request_callback(RawAddress* bd_addr, bt_bdname_t* bdname,
                                (jint)pairing_variant, pass_key);
 }
 
+static jobject createClassicOobDataObject(JNIEnv* env, bt_oob_data_t oob_data) {
+  ALOGV("%s", __func__);
+  jclass classicBuilderClass =
+      env->FindClass("android/bluetooth/OobData$ClassicBuilder");
+
+  jbyteArray confirmationHash = env->NewByteArray(OOB_C_SIZE);
+  env->SetByteArrayRegion(confirmationHash, 0, OOB_C_SIZE,
+                          reinterpret_cast<jbyte*>(oob_data.c));
+
+  jbyteArray oobDataLength = env->NewByteArray(OOB_DATA_LEN_SIZE);
+  env->SetByteArrayRegion(oobDataLength, 0, OOB_DATA_LEN_SIZE,
+                          reinterpret_cast<jbyte*>(oob_data.oob_data_length));
+
+  jbyteArray address = env->NewByteArray(OOB_ADDRESS_SIZE);
+  env->SetByteArrayRegion(address, 0, OOB_ADDRESS_SIZE,
+                          reinterpret_cast<jbyte*>(oob_data.address));
+
+  jmethodID classicBuilderConstructor =
+      env->GetMethodID(classicBuilderClass, "<init>", "([B[B[B)V");
+
+  jobject oobDataClassicBuilder =
+      env->NewObject(classicBuilderClass, classicBuilderConstructor,
+                     confirmationHash, oobDataLength, address);
+
+  jmethodID setRMethod =
+      env->GetMethodID(classicBuilderClass, "setRandomizerHash",
+                       "([B)Landroid/bluetooth/OobData$ClassicBuilder;");
+  jbyteArray randomizerHash = env->NewByteArray(OOB_R_SIZE);
+  env->SetByteArrayRegion(randomizerHash, 0, OOB_R_SIZE,
+                          reinterpret_cast<jbyte*>(oob_data.r));
+
+  oobDataClassicBuilder =
+      env->CallObjectMethod(oobDataClassicBuilder, setRMethod, randomizerHash);
+
+  jmethodID buildMethod = env->GetMethodID(classicBuilderClass, "build",
+                                           "()Landroid/bluetooth/OobData;");
+
+  return env->CallObjectMethod(oobDataClassicBuilder, buildMethod);
+}
+
+static jobject createLeOobDataObject(JNIEnv* env, bt_oob_data_t oob_data) {
+  ALOGV("%s", __func__);
+
+  jclass leBuilderClass = env->FindClass("android/bluetooth/OobData$LeBuilder");
+
+  jbyteArray confirmationHash = env->NewByteArray(OOB_C_SIZE);
+  env->SetByteArrayRegion(confirmationHash, 0, OOB_C_SIZE,
+                          reinterpret_cast<jbyte*>(oob_data.c));
+
+  jbyteArray address = env->NewByteArray(OOB_ADDRESS_SIZE);
+  env->SetByteArrayRegion(address, 0, OOB_ADDRESS_SIZE,
+                          reinterpret_cast<jbyte*>(oob_data.address));
+
+  jint le_role = (jint)oob_data.le_device_role;
+
+  jmethodID leBuilderConstructor =
+      env->GetMethodID(leBuilderClass, "<init>", "([B[BI)V");
+
+  jobject oobDataLeBuilder = env->NewObject(
+      leBuilderClass, leBuilderConstructor, confirmationHash, address, le_role);
+
+  jmethodID setRMethod =
+      env->GetMethodID(leBuilderClass, "setRandomizerHash",
+                       "([B)Landroid/bluetooth/OobData$LeBuilder;");
+  jbyteArray randomizerHash = env->NewByteArray(OOB_R_SIZE);
+  env->SetByteArrayRegion(randomizerHash, 0, OOB_R_SIZE,
+                          reinterpret_cast<jbyte*>(oob_data.r));
+
+  oobDataLeBuilder =
+      env->CallObjectMethod(oobDataLeBuilder, setRMethod, randomizerHash);
+
+  jmethodID buildMethod = env->GetMethodID(leBuilderClass, "build",
+                                           "()Landroid/bluetooth/OobData;");
+
+  return env->CallObjectMethod(oobDataLeBuilder, buildMethod);
+}
+
+static void generate_local_oob_data_callback(tBT_TRANSPORT transport,
+                                             bt_oob_data_t oob_data) {
+  ALOGV("%s", __func__);
+  CallbackEnv sCallbackEnv(__func__);
+  if (!sCallbackEnv.valid()) return;
+
+  if (transport == TRANSPORT_BREDR) {
+    sCallbackEnv->CallVoidMethod(
+        sJniCallbacksObj, method_oobDataReceivedCallback, (jint)transport,
+        ((oob_data.is_valid)
+             ? createClassicOobDataObject(sCallbackEnv.get(), oob_data)
+             : nullptr));
+  } else if (transport == TRANSPORT_LE) {
+    sCallbackEnv->CallVoidMethod(
+        sJniCallbacksObj, method_oobDataReceivedCallback, (jint)transport,
+        ((oob_data.is_valid)
+             ? createLeOobDataObject(sCallbackEnv.get(), oob_data)
+             : nullptr));
+  } else {
+    // TRANSPORT_AUTO is a concept, however, the host stack doesn't fully
+    // implement it So passing it from the java layer is currently useless until
+    // the implementation and concept of TRANSPORT_AUTO is fleshed out.
+    ALOGE("TRANSPORT: %d not implemented", transport);
+    sCallbackEnv->CallVoidMethod(sJniCallbacksObj,
+                                 method_oobDataReceivedCallback,
+                                 (jint)transport, nullptr);
+  }
+}
+
 static void link_quality_report_callback(
     uint64_t timestamp, int report_id, int rssi, int snr,
     int retransmission_count, int packets_not_receive_count,
@@ -480,14 +587,14 @@ static void energy_info_recv_callback(bt_activity_energy_info* p_energy_info,
 }
 
 static bt_callbacks_t sBluetoothCallbacks = {
-    sizeof(sBluetoothCallbacks), adapter_state_change_callback,
-    adapter_properties_callback, remote_device_properties_callback,
-    device_found_callback,       discovery_state_changed_callback,
-    pin_request_callback,        ssp_request_callback,
-    bond_state_changed_callback, acl_state_changed_callback,
-    callback_thread_event,       dut_mode_recv_callback,
-    le_test_mode_recv_callback,  energy_info_recv_callback,
-    link_quality_report_callback};
+    sizeof(sBluetoothCallbacks),  adapter_state_change_callback,
+    adapter_properties_callback,  remote_device_properties_callback,
+    device_found_callback,        discovery_state_changed_callback,
+    pin_request_callback,         ssp_request_callback,
+    bond_state_changed_callback,  acl_state_changed_callback,
+    callback_thread_event,        dut_mode_recv_callback,
+    le_test_mode_recv_callback,   energy_info_recv_callback,
+    link_quality_report_callback, generate_local_oob_data_callback};
 
 // The callback to call when the wake alarm fires.
 static alarm_cb sAlarmCallback;
@@ -672,6 +779,10 @@ static void classInitNative(JNIEnv* env, jclass clazz) {
       env->FindClass("com/android/bluetooth/btservice/JniCallbacks");
   sJniCallbacksField = env->GetFieldID(
       clazz, "mJniCallbacks", "Lcom/android/bluetooth/btservice/JniCallbacks;");
+
+  method_oobDataReceivedCallback =
+      env->GetMethodID(jniCallbackClass, "oobDataReceivedCallback",
+                       "(ILandroid/bluetooth/OobData;)V");
 
   method_stateChangeCallback =
       env->GetMethodID(jniCallbackClass, "stateChangeCallback", "(I)V");
@@ -1035,7 +1146,7 @@ static jboolean set_data(JNIEnv* env, bt_oob_data_t& oob_data, jobject oobData,
     if (leAppearance != NULL) {
       leAppearanceBytes = env->GetByteArrayElements(leAppearance, NULL);
       int len = env->GetArrayLength(leAppearance);
-      if (len != OOB_LE_ROLE_SIZE) {
+      if (len != OOB_LE_APPEARANCE_SIZE) {
         ALOGI("%s: wrong length of leAppearance, should be empty or %d bytes.",
               __func__, OOB_LE_APPEARANCE_SIZE);
         jniThrowIOException(env, EINVAL);
@@ -1051,10 +1162,24 @@ static jboolean set_data(JNIEnv* env, bt_oob_data_t& oob_data, jobject oobData,
     oob_data.le_device_role = leRole;
 
     jint leFlag =
-        callIntGetter(env, oobData, "android/bluetooth/OobData", "getLeFlag");
+        callIntGetter(env, oobData, "android/bluetooth/OobData", "getLeFlags");
     oob_data.le_flags = leFlag;
   }
   return JNI_TRUE;
+}
+
+static void generateLocalOobDataNative(JNIEnv* env, jobject obj,
+                                       jint transport) {
+  // No BT interface? Can't do anything.
+  if (!sBluetoothInterface) return;
+
+  if (sBluetoothInterface->generate_local_oob_data(transport) !=
+      BT_STATUS_SUCCESS) {
+    ALOGE("%s: Call to generate_local_oob_data failed!", __func__);
+    bt_oob_data_t oob_data;
+    oob_data.is_valid = false;
+    generate_local_oob_data_callback(transport, oob_data);
+  }
 }
 
 static jboolean createBondOutOfBandNative(JNIEnv* env, jobject obj,
@@ -1088,22 +1213,32 @@ static jboolean createBondOutOfBandNative(JNIEnv* env, jobject obj,
     return JNI_FALSE;
   }
 
-  // Convert P192 data from Java POJO to C Struct
-  bt_oob_data_t p192_data;
-  if (set_data(env, p192_data, p192Data, transport) == JNI_FALSE) {
+  jbyte* addr = env->GetByteArrayElements(address, NULL);
+  if (addr == NULL) {
     jniThrowIOException(env, EINVAL);
     return JNI_FALSE;
+  }
+
+  // Convert P192 data from Java POJO to C Struct
+  bt_oob_data_t p192_data;
+  if (p192Data != NULL) {
+    if (set_data(env, p192_data, p192Data, transport) == JNI_FALSE) {
+      jniThrowIOException(env, EINVAL);
+      return JNI_FALSE;
+    }
   }
 
   // Convert P256 data from Java POJO to C Struct
   bt_oob_data_t p256_data;
-  if (set_data(env, p256_data, p256Data, transport) == JNI_FALSE) {
-    jniThrowIOException(env, EINVAL);
-    return JNI_FALSE;
+  if (p256Data != NULL) {
+    if (set_data(env, p256_data, p256Data, transport) == JNI_FALSE) {
+      jniThrowIOException(env, EINVAL);
+      return JNI_FALSE;
+    }
   }
 
   return ((sBluetoothInterface->create_bond_out_of_band(
-              (RawAddress*)address, transport, &p192_data, &p256_data)) ==
+              (RawAddress*)addr, transport, &p192_data, &p256_data)) ==
           BT_STATUS_SUCCESS)
              ? JNI_TRUE
              : JNI_FALSE;
@@ -1536,6 +1671,7 @@ static JNINativeMethod sMethods[] = {
      (void*)createBondOutOfBandNative},
     {"removeBondNative", "([B)Z", (void*)removeBondNative},
     {"cancelBondNative", "([B)Z", (void*)cancelBondNative},
+    {"generateLocalOobDataNative", "(I)V", (void*)generateLocalOobDataNative},
     {"getConnectionStateNative", "([B)I", (void*)getConnectionStateNative},
     {"pinReplyNative", "([BZI[B)Z", (void*)pinReplyNative},
     {"sspReplyNative", "([BIZI)Z", (void*)sspReplyNative},
@@ -1675,6 +1811,12 @@ jint JNI_OnLoad(JavaVM* jvm, void* reserved) {
   status = android::register_com_android_bluetooth_le_audio(e);
   if (status < 0) {
     ALOGE("jni le_audio registration failure: %d", status);
+    return JNI_ERR;
+  }
+
+  status = android::register_com_android_bluetooth_vc(e);
+  if (status < 0) {
+    ALOGE("jni vc registration failure: %d", status);
     return JNI_ERR;
   }
 
