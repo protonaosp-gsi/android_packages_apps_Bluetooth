@@ -22,10 +22,10 @@ import android.bluetooth.IBluetoothManager;
 import android.content.ContentResolver;
 import android.content.Context;
 import android.content.res.Resources;
-import android.os.SystemProperties;
 import android.os.IBinder;
 import android.os.RemoteException;
 import android.os.ServiceManager;
+import android.os.SystemProperties;
 import android.provider.Settings;
 import android.text.TextUtils;
 import android.util.Log;
@@ -48,6 +48,7 @@ import com.android.bluetooth.pan.PanService;
 import com.android.bluetooth.pbap.BluetoothPbapService;
 import com.android.bluetooth.pbapclient.PbapClientService;
 import com.android.bluetooth.sap.SapService;
+import com.android.bluetooth.vc.VolumeControlService;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -104,12 +105,16 @@ public class Config {
                     (1 << BluetoothProfile.OPP)),
             new ProfileConfig(BluetoothPbapService.class, R.bool.profile_supported_pbap,
                     (1 << BluetoothProfile.PBAP)),
+            new ProfileConfig(VolumeControlService.class, R.bool.profile_supported_vc,
+                    (1 << BluetoothProfile.VOLUME_CONTROL)),
             new ProfileConfig(HearingAidService.class,
                     com.android.internal.R.bool.config_hearing_aid_profile_supported,
                     (1 << BluetoothProfile.HEARING_AID))
     };
 
     private static Class[] sSupportedProfiles = new Class[0];
+
+    private static boolean sIsGdEnabledUptoScanningLayer = false;
 
     static void init(Context ctx) {
         if (ctx == null) {
@@ -143,10 +148,15 @@ public class Config {
             }
         }
         sSupportedProfiles = profiles.toArray(new Class[profiles.size()]);
+        sIsGdEnabledUptoScanningLayer = resources.getBoolean(R.bool.enable_gd_up_to_scanning_layer);
     }
 
     static Class[] getSupportedProfiles() {
         return sSupportedProfiles;
+    }
+
+    static boolean isGdEnabledUpToScanningLayer() {
+        return sIsGdEnabledUptoScanningLayer;
     }
 
     private static long getProfileMask(Class profile) {

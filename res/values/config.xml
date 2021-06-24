@@ -32,6 +32,7 @@
     <bool name="profile_supported_pbapclient">false</bool>
     <bool name="profile_supported_mapmce">false</bool>
     <bool name="profile_supported_hid_device">true</bool>
+    <bool name="profile_supported_vc">false</bool>
 
     <!-- If true, we will require location to be enabled on the device to
          fire Bluetooth LE scan result callbacks in addition to having one
@@ -74,7 +75,7 @@
     <bool name="a2dp_sink_automatically_request_audio_focus">false</bool>
 
     <!-- For enabling the AVRCP Controller Cover Artwork feature -->
-    <bool name="avrcp_controller_enable_cover_art">false</bool>
+    <bool name="avrcp_controller_enable_cover_art">true</bool>
 
     <!-- For enabling browsed cover art with the AVRCP Controller Cover Artwork feature -->
     <bool name="avrcp_controller_cover_art_browsed_images">false</bool>
@@ -105,6 +106,9 @@
     <!-- For enabling the AVRCP Target Cover Artowrk feature-->
     <bool name="avrcp_target_enable_cover_art">true</bool>
 
+    <!-- Enable support for URI based images. Off by default due to increased memory usage -->
+    <bool name="avrcp_target_cover_art_uri_images">false</bool>
+
     <!-- Package that is responsible for user interaction on pairing request,
          success or cancel.
          Receives:
@@ -120,5 +124,16 @@
 
     <!-- Package that is providing the exposure notification service -->
     <string name="exposure_notification_package">com.google.android.gms</string>
+
+    <!-- Enabling Gabeldorsche up to the scanning layer, including
+            - BLE scanning
+            - BLE advertising
+            - ACL connection management
+            - Controller information management
+            - HCI layer
+            - HAL interface layer
+            - Other required GD components like config storage
+     -->
+    <bool name="enable_gd_up_to_scanning_layer">true</bool>
 
 </resources>

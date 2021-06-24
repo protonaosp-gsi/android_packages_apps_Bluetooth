@@ -46,6 +46,7 @@ import android.bluetooth.IBluetooth;
 import android.bluetooth.IBluetoothCallback;
 import android.bluetooth.IBluetoothConnectionCallback;
 import android.bluetooth.IBluetoothMetadataListener;
+import android.bluetooth.IBluetoothOobDataCallback;
 import android.bluetooth.IBluetoothSocketManager;
 import android.bluetooth.OobData;
 import android.bluetooth.UidTraffic;
@@ -104,6 +105,7 @@ import com.android.bluetooth.pbapclient.PbapClientService;
 import com.android.bluetooth.sap.SapService;
 import com.android.bluetooth.sdp.SdpManager;
 import com.android.bluetooth.telephony.BluetoothInCallService;
+import com.android.bluetooth.vc.VolumeControlService;
 import com.android.internal.R;
 import com.android.internal.annotations.VisibleForTesting;
 import com.android.internal.app.IBatteryStats;
@@ -115,6 +117,7 @@ import java.io.FileDescriptor;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -202,7 +205,6 @@ public class AdapterService extends Service {
     private static AdapterService sAdapterService;
 
     public static synchronized AdapterService getAdapterService() {
-        Log.d(TAG, "getAdapterService() - returning " + sAdapterService);
         return sAdapterService;
     }
 
@@ -271,6 +273,7 @@ public class AdapterService extends Service {
     private PbapClientService mPbapClientService;
     private HearingAidService mHearingAidService;
     private SapService mSapService;
+    private VolumeControlService mVolumeControlService;
 
     /**
      * Register a {@link ProfileService} with AdapterService.
@@ -976,6 +979,9 @@ public class AdapterService extends Service {
         if (profile == BluetoothProfile.SAP) {
             return ArrayUtils.contains(remoteDeviceUuids, BluetoothUuid.SAP);
         }
+        if (profile == BluetoothProfile.VOLUME_CONTROL) {
+            return ArrayUtils.contains(remoteDeviceUuids, BluetoothUuid.VOLUME_CONTROL);
+        }
 
         Log.e(TAG, "isSupported: Unexpected profile passed in to function: " + profile);
         return false;
@@ -1022,6 +1028,10 @@ public class AdapterService extends Service {
             return true;
         }
         if (mHearingAidService != null && mHearingAidService.getConnectionPolicy(device)
+                > BluetoothProfile.CONNECTION_POLICY_FORBIDDEN) {
+            return true;
+        }
+        if (mVolumeControlService != null && mVolumeControlService.getConnectionPolicy(device)
                 > BluetoothProfile.CONNECTION_POLICY_FORBIDDEN) {
             return true;
         }
@@ -1098,6 +1108,13 @@ public class AdapterService extends Service {
             Log.i(TAG, "connectEnabledProfiles: Connecting Hearing Aid Profile");
             mHearingAidService.connect(device);
         }
+        if (mVolumeControlService != null && isSupported(localDeviceUuids, remoteDeviceUuids,
+                BluetoothProfile.VOLUME_CONTROL, device)
+                && mVolumeControlService.getConnectionPolicy(device)
+                > BluetoothProfile.CONNECTION_POLICY_FORBIDDEN) {
+            Log.i(TAG, "connectEnabledProfiles: Connecting Volume Control Profile");
+            mVolumeControlService.connect(device);
+        }
 
         return true;
     }
@@ -1135,6 +1152,7 @@ public class AdapterService extends Service {
         mPbapClientService = PbapClientService.getPbapClientService();
         mHearingAidService = HearingAidService.getHearingAidService();
         mSapService = SapService.getSapService();
+        mVolumeControlService = VolumeControlService.getVolumeControlService();
     }
 
     private boolean isAvailable() {
@@ -1588,6 +1606,17 @@ public class AdapterService extends Service {
 
             DeviceProperties deviceProp = service.mRemoteDevices.getDeviceProperties(device);
             return deviceProp != null && deviceProp.isBondingInitiatedLocally();
+        }
+
+        @Override
+        public void generateLocalOobData(int transport, IBluetoothOobDataCallback callback) {
+            AdapterService service = getService();
+            if (service == null || !callerIsSystemOrActiveOrManagedUser(service,
+                    TAG, "generateLocalOobData")) {
+                return;
+            }
+            enforceBluetoothPrivilegedPermission(service);
+            service.generateLocalOobData(transport, callback);
         }
 
         @Override
@@ -2443,6 +2472,56 @@ public class AdapterService extends Service {
         return true;
     }
 
+    private final ArrayDeque<IBluetoothOobDataCallback> mOobDataCallbackQueue =
+            new ArrayDeque<>();
+
+    /**
+     * Fetches the local OOB data to give out to remote.
+     *
+     * @param transport - specify data transport.
+     * @param callback - callback used to receive the requested {@link Oobdata}; null will be
+     * ignored silently.
+     *
+     * @hide
+     */
+    public synchronized void generateLocalOobData(int transport,
+            IBluetoothOobDataCallback callback) {
+        if (callback == null) {
+            Log.e(TAG, "'callback' argument must not be null!");
+            return;
+        }
+        if (mOobDataCallbackQueue.peek() != null) {
+            try {
+                callback.onError(BluetoothAdapter.OOB_ERROR_ANOTHER_ACTIVE_REQUEST);
+                return;
+            } catch (RemoteException e) {
+                Log.e(TAG, "Failed to make callback", e);
+            }
+        }
+        mOobDataCallbackQueue.offer(callback);
+        generateLocalOobDataNative(transport);
+    }
+
+    /* package */ synchronized void notifyOobDataCallback(int transport, OobData oobData) {
+        if (mOobDataCallbackQueue.peek() == null) {
+            Log.e(TAG, "Failed to make callback, no callback exists");
+            return;
+        }
+        if (oobData == null) {
+            try {
+                mOobDataCallbackQueue.poll().onError(BluetoothAdapter.OOB_ERROR_UNKNOWN);
+            } catch (RemoteException e) {
+                Log.e(TAG, "Failed to make callback", e);
+            }
+        } else {
+            try {
+                mOobDataCallbackQueue.poll().onOobData(transport, oobData);
+            } catch (RemoteException e) {
+                Log.e(TAG, "Failed to make callback", e);
+            }
+        }
+    }
+
     public boolean isQuietModeEnabled() {
         debugLog("isQuetModeEnabled() - Enabled = " + mQuietmode);
         return mQuietmode;
@@ -2634,6 +2713,13 @@ public class AdapterService extends Service {
                     BluetoothProfile.CONNECTION_POLICY_ALLOWED);
             numProfilesConnected++;
         }
+        if (mVolumeControlService != null && isSupported(localDeviceUuids, remoteDeviceUuids,
+                BluetoothProfile.VOLUME_CONTROL, device)) {
+            Log.i(TAG, "connectAllEnabledProfiles: Connecting Volume Control Profile");
+            mVolumeControlService.setConnectionPolicy(device,
+                    BluetoothProfile.CONNECTION_POLICY_ALLOWED);
+            numProfilesConnected++;
+        }
 
         Log.i(TAG, "connectAllEnabledProfiles: Number of Profiles Connected: "
                 + numProfilesConnected);
@@ -2713,6 +2799,11 @@ public class AdapterService extends Service {
                 == BluetoothProfile.STATE_CONNECTED) {
             Log.i(TAG, "disconnectAllEnabledProfiles: Disconnecting Hearing Aid Profile");
             mHearingAidService.disconnect(device);
+        }
+        if (mVolumeControlService != null && mVolumeControlService.getConnectionState(device)
+                == BluetoothProfile.STATE_CONNECTED) {
+            Log.i(TAG, "disconnectAllEnabledProfiles: Disconnecting Volume Control Profile");
+            mVolumeControlService.disconnect(device);
         }
         if (mSapService != null && mSapService.getConnectionState(device)
                 == BluetoothProfile.STATE_CONNECTED) {
@@ -3323,7 +3414,8 @@ public class AdapterService extends Service {
         if (DeviceConfig.getBoolean(DeviceConfig.NAMESPACE_BLUETOOTH, GD_ADVERTISING_FLAG, false)) {
             initFlags.add(String.format("%s=%s", GD_ADVERTISING_FLAG, "true"));
         }
-        if (DeviceConfig.getBoolean(DeviceConfig.NAMESPACE_BLUETOOTH, GD_SCANNING_FLAG, false)) {
+        if (DeviceConfig.getBoolean(DeviceConfig.NAMESPACE_BLUETOOTH, GD_SCANNING_FLAG,
+                Config.isGdEnabledUpToScanningLayer())) {
             initFlags.add(String.format("%s=%s", GD_SCANNING_FLAG, "true"));
         }
         if (DeviceConfig.getBoolean(DeviceConfig.NAMESPACE_BLUETOOTH, GD_HCI_FLAG, false)) {
@@ -3468,6 +3560,9 @@ public class AdapterService extends Service {
 
     /*package*/
     native boolean cancelBondNative(byte[] address);
+
+    /*package*/
+    native void generateLocalOobDataNative(int transport);
 
     /*package*/
     native boolean sdpSearchNative(byte[] address, byte[] uuid);
