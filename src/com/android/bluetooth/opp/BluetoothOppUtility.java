@@ -448,6 +448,13 @@ public class BluetoothOppUtility {
         return isSameOrSubDirectory(Environment.getExternalStorageDirectory(), file);
     }
 
+    static boolean isForbiddenContent(Uri uri) {
+        if ("com.android.bluetooth.map.MmsFileProvider".equals(uri.getHost())) {
+            return true;
+        }
+        return false;
+    }
+
     /**
      * Checks, whether the child directory is the same as, or a sub-directory of the base
      * directory. Neither base nor child should be null.
@@ -471,8 +478,7 @@ public class BluetoothOppUtility {
     }
 
     protected static void cancelNotification(Context ctx) {
-        NotificationManager nm = (NotificationManager) ctx
-                .getSystemService(Context.NOTIFICATION_SERVICE);
+        NotificationManager nm = ctx.getSystemService(NotificationManager.class);
         nm.cancel(BluetoothOppNotification.NOTIFICATION_ID_PROGRESS);
     }
 

@@ -25,7 +25,6 @@ import android.content.ContentValues;
 import android.content.Context;
 import android.content.ContextWrapper;
 import android.content.pm.PackageManager;
-import android.content.pm.UserInfo;
 import android.location.LocationManager;
 import android.net.Uri;
 import android.os.Binder;
@@ -51,6 +50,7 @@ import java.nio.charset.CharsetDecoder;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
@@ -332,9 +332,10 @@ public final class Utils {
     }
 
     public static boolean checkCaller() {
-        int callingUser = UserHandle.getCallingUserId();
         int callingUid = Binder.getCallingUid();
-        return (sForegroundUserId == callingUser)
+        UserHandle callingUser = UserHandle.getUserHandleForUid(callingUid);
+
+        return (sForegroundUserId == callingUser.getIdentifier())
                 || (UserHandle.getAppId(sSystemUiUid) == UserHandle.getAppId(callingUid))
                 || (UserHandle.getAppId(Process.SYSTEM_UID) == UserHandle.getAppId(callingUid));
     }
@@ -343,18 +344,19 @@ public final class Utils {
         if (mContext == null) {
             return checkCaller();
         }
-        int callingUser = UserHandle.getCallingUserId();
         int callingUid = Binder.getCallingUid();
+        UserHandle callingUser = UserHandle.getUserHandleForUid(callingUid);
 
         // Use the Bluetooth process identity when making call to get parent user
         final long ident = Binder.clearCallingIdentity();
         try {
-            UserManager um = (UserManager) mContext.getSystemService(Context.USER_SERVICE);
-            UserInfo ui = um.getProfileParent(callingUser);
-            int parentUser = (ui != null) ? ui.id : UserHandle.USER_NULL;
+            UserManager um = mContext.getSystemService(UserManager.class);
+            UserHandle uh = um.getProfileParent(callingUser);
+            int parentUser = (uh != null) ? uh.getIdentifier() : UserHandle.USER_NULL;
 
             // Always allow SystemUI/System access.
-            return (sForegroundUserId == callingUser) || (sForegroundUserId == parentUser)
+            return (sForegroundUserId == callingUser.getIdentifier())
+                    || (sForegroundUserId == parentUser)
                     || (UserHandle.getAppId(sSystemUiUid) == UserHandle.getAppId(callingUid))
                     || (UserHandle.getAppId(Process.SYSTEM_UID) == UserHandle.getAppId(callingUid));
         } catch (Exception ex) {
@@ -632,5 +634,19 @@ public final class Utils {
         values.put(Telephony.Sms.ERROR_CODE, 0);
 
         return 1 == context.getContentResolver().update(uri, values, null, null);
+    }
+
+    /**
+     * Checks that value is present as at least one of the elements of the array.
+     * @param array the array to check in
+     * @param value the value to check for
+     * @return true if the value is present in the array
+     */
+    public static <T> boolean arrayContains(@Nullable T[] array, T value) {
+        if (array == null) return false;
+        for (T element : array) {
+            if (Objects.equals(element, value)) return true;
+        }
+        return false;
     }
 }

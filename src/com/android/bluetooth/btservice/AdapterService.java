@@ -109,7 +109,6 @@ import com.android.bluetooth.vc.VolumeControlService;
 import com.android.internal.R;
 import com.android.internal.annotations.VisibleForTesting;
 import com.android.internal.app.IBatteryStats;
-import com.android.internal.util.ArrayUtils;
 
 import com.google.protobuf.InvalidProtocolBufferException;
 
@@ -491,8 +490,9 @@ public class AdapterService extends Service {
         // Android TV doesn't show consent dialogs for just works and encryption only le pairing
         boolean isAtvDevice = getApplicationContext().getPackageManager().hasSystemFeature(
                 PackageManager.FEATURE_LEANBACK_ONLY);
-        initNative(isGuest(), isCommonCriteriaMode(), configCompareResult, getInitFlags(),
-                isAtvDevice);
+        mUserManager = getSystemService(UserManager.class);
+        initNative(mUserManager.isGuestUser(), isCommonCriteriaMode(), configCompareResult,
+                getInitFlags(), isAtvDevice);
         mNativeAvailable = true;
         mCallbacks = new RemoteCallbackList<IBluetoothCallback>();
         mAppOps = getSystemService(AppOpsManager.class);
@@ -500,9 +500,8 @@ public class AdapterService extends Service {
         getAdapterPropertyNative(AbstractionLayer.BT_PROPERTY_BDADDR);
         getAdapterPropertyNative(AbstractionLayer.BT_PROPERTY_BDNAME);
         getAdapterPropertyNative(AbstractionLayer.BT_PROPERTY_CLASS_OF_DEVICE);
-        mAlarmManager = (AlarmManager) getSystemService(Context.ALARM_SERVICE);
-        mPowerManager = (PowerManager) getSystemService(Context.POWER_SERVICE);
-        mUserManager = (UserManager) getSystemService(Context.USER_SERVICE);
+        mAlarmManager = getSystemService(AlarmManager.class);
+        mPowerManager = getSystemService(PowerManager.class);
         mBatteryStats = IBatteryStats.Stub.asInterface(
                 ServiceManager.getService(BatteryStats.SERVICE_NAME));
 
@@ -929,36 +928,36 @@ public class AdapterService extends Service {
         }
 
         if (profile == BluetoothProfile.HEADSET) {
-            return (ArrayUtils.contains(localDeviceUuids, BluetoothUuid.HSP_AG)
-                    && ArrayUtils.contains(remoteDeviceUuids, BluetoothUuid.HSP))
-                    || (ArrayUtils.contains(localDeviceUuids, BluetoothUuid.HFP_AG)
-                    && ArrayUtils.contains(remoteDeviceUuids, BluetoothUuid.HFP));
+            return (Utils.arrayContains(localDeviceUuids, BluetoothUuid.HSP_AG)
+                    && Utils.arrayContains(remoteDeviceUuids, BluetoothUuid.HSP))
+                    || (Utils.arrayContains(localDeviceUuids, BluetoothUuid.HFP_AG)
+                    && Utils.arrayContains(remoteDeviceUuids, BluetoothUuid.HFP));
         }
         if (profile == BluetoothProfile.HEADSET_CLIENT) {
-            return ArrayUtils.contains(remoteDeviceUuids, BluetoothUuid.HFP_AG)
-                    && ArrayUtils.contains(localDeviceUuids, BluetoothUuid.HFP);
+            return Utils.arrayContains(remoteDeviceUuids, BluetoothUuid.HFP_AG)
+                    && Utils.arrayContains(localDeviceUuids, BluetoothUuid.HFP);
         }
         if (profile == BluetoothProfile.A2DP) {
-            return ArrayUtils.contains(remoteDeviceUuids, BluetoothUuid.ADV_AUDIO_DIST)
-                    || ArrayUtils.contains(remoteDeviceUuids, BluetoothUuid.A2DP_SINK);
+            return Utils.arrayContains(remoteDeviceUuids, BluetoothUuid.ADV_AUDIO_DIST)
+                    || Utils.arrayContains(remoteDeviceUuids, BluetoothUuid.A2DP_SINK);
         }
         if (profile == BluetoothProfile.A2DP_SINK) {
-            return ArrayUtils.contains(remoteDeviceUuids, BluetoothUuid.ADV_AUDIO_DIST)
-                    || ArrayUtils.contains(remoteDeviceUuids, BluetoothUuid.A2DP_SOURCE);
+            return Utils.arrayContains(remoteDeviceUuids, BluetoothUuid.ADV_AUDIO_DIST)
+                    || Utils.arrayContains(remoteDeviceUuids, BluetoothUuid.A2DP_SOURCE);
         }
         if (profile == BluetoothProfile.OPP) {
-            return ArrayUtils.contains(remoteDeviceUuids, BluetoothUuid.OBEX_OBJECT_PUSH);
+            return Utils.arrayContains(remoteDeviceUuids, BluetoothUuid.OBEX_OBJECT_PUSH);
         }
         if (profile == BluetoothProfile.HID_HOST) {
-            return ArrayUtils.contains(remoteDeviceUuids, BluetoothUuid.HID)
-                    || ArrayUtils.contains(remoteDeviceUuids, BluetoothUuid.HOGP);
+            return Utils.arrayContains(remoteDeviceUuids, BluetoothUuid.HID)
+                    || Utils.arrayContains(remoteDeviceUuids, BluetoothUuid.HOGP);
         }
         if (profile == BluetoothProfile.HID_DEVICE) {
             return mHidDeviceService.getConnectionState(device)
                     == BluetoothProfile.STATE_DISCONNECTED;
         }
         if (profile == BluetoothProfile.PAN) {
-            return ArrayUtils.contains(remoteDeviceUuids, BluetoothUuid.NAP);
+            return Utils.arrayContains(remoteDeviceUuids, BluetoothUuid.NAP);
         }
         if (profile == BluetoothProfile.MAP) {
             return mMapService.getConnectionState(device) == BluetoothProfile.STATE_CONNECTED;
@@ -970,17 +969,17 @@ public class AdapterService extends Service {
             return true;
         }
         if (profile == BluetoothProfile.PBAP_CLIENT) {
-            return ArrayUtils.contains(localDeviceUuids, BluetoothUuid.PBAP_PCE)
-                    && ArrayUtils.contains(remoteDeviceUuids, BluetoothUuid.PBAP_PSE);
+            return Utils.arrayContains(localDeviceUuids, BluetoothUuid.PBAP_PCE)
+                    && Utils.arrayContains(remoteDeviceUuids, BluetoothUuid.PBAP_PSE);
         }
         if (profile == BluetoothProfile.HEARING_AID) {
-            return ArrayUtils.contains(remoteDeviceUuids, BluetoothUuid.HEARING_AID);
+            return Utils.arrayContains(remoteDeviceUuids, BluetoothUuid.HEARING_AID);
         }
         if (profile == BluetoothProfile.SAP) {
-            return ArrayUtils.contains(remoteDeviceUuids, BluetoothUuid.SAP);
+            return Utils.arrayContains(remoteDeviceUuids, BluetoothUuid.SAP);
         }
         if (profile == BluetoothProfile.VOLUME_CONTROL) {
-            return ArrayUtils.contains(remoteDeviceUuids, BluetoothUuid.VOLUME_CONTROL);
+            return Utils.arrayContains(remoteDeviceUuids, BluetoothUuid.VOLUME_CONTROL);
         }
 
         Log.e(TAG, "isSupported: Unexpected profile passed in to function: " + profile);
@@ -2390,7 +2389,7 @@ public class AdapterService extends Service {
     }
 
     boolean startDiscovery(String callingPackage, @Nullable String callingFeatureId) {
-        UserHandle callingUser = UserHandle.of(UserHandle.getCallingUserId());
+        UserHandle callingUser = Binder.getCallingUserHandle();
         debugLog("startDiscovery");
         mAppOps.checkPackage(Binder.getCallingUid(), callingPackage);
         boolean isQApp = Utils.isQApp(this, callingPackage);
@@ -3365,13 +3364,8 @@ public class AdapterService extends Service {
         }
     };
 
-    private boolean isGuest() {
-        return UserManager.get(this).isGuestUser();
-    }
-
     private boolean isCommonCriteriaMode() {
-        return ((DevicePolicyManager) getSystemService(Context.DEVICE_POLICY_SERVICE))
-                .isCommonCriteriaModeEnabled(null);
+        return getSystemService(DevicePolicyManager.class).isCommonCriteriaModeEnabled(null);
     }
 
     // Boolean flags
