@@ -18,7 +18,6 @@ package com.android.bluetooth.util;
 
 import android.app.admin.DevicePolicyManager;
 import android.content.Context;
-import android.content.pm.UserInfo;
 import android.net.Uri;
 import android.os.UserHandle;
 import android.os.UserManager;
@@ -28,19 +27,16 @@ import java.util.List;
 
 public final class DevicePolicyUtils {
     private static boolean isBluetoothWorkContactSharingDisabled(Context context) {
-        final DevicePolicyManager dpm =
-                (DevicePolicyManager) context.getSystemService(Context.DEVICE_POLICY_SERVICE);
-        final UserManager userManager =
-                (UserManager) context.getSystemService(Context.USER_SERVICE);
-        final int myUserId = UserHandle.myUserId();
-        final List<UserInfo> userInfoList = userManager.getProfiles(myUserId);
+        final DevicePolicyManager dpm = context.getSystemService(DevicePolicyManager.class);
+        final UserManager userManager = context.getSystemService(UserManager.class);
+        final List<UserHandle> userHandleList = userManager.getAllProfiles();
 
         // Check each user.
-        for (UserInfo ui : userInfoList) {
-            if (!userManager.isManagedProfile(ui.id)) {
+        for (UserHandle uh : userHandleList) {
+            if (!userManager.isManagedProfile(uh.getIdentifier())) {
                 continue; // Not a managed user.
             }
-            return dpm.getBluetoothContactSharingDisabled(new UserHandle(ui.id));
+            return dpm.getBluetoothContactSharingDisabled(uh);
         }
         // No managed profile, so this feature is disabled
         return true;
