@@ -21,6 +21,7 @@ import android.bluetooth.BluetoothAudioConfig;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothProfile;
 import android.bluetooth.IBluetoothA2dpSink;
+import android.content.Attributable;
 import android.content.AttributionSource;
 import android.media.AudioManager;
 import android.util.Log;
@@ -206,6 +207,7 @@ public class A2dpSinkService extends ProfileService {
 
         @Override
         public boolean connect(BluetoothDevice device, AttributionSource source) {
+            Attributable.setAttributionSource(device, source);
             A2dpSinkService service = getService(source);
             if (service == null) {
                 return false;
@@ -215,6 +217,7 @@ public class A2dpSinkService extends ProfileService {
 
         @Override
         public boolean disconnect(BluetoothDevice device, AttributionSource source) {
+            Attributable.setAttributionSource(device, source);
             A2dpSinkService service = getService(source);
             if (service == null) {
                 return false;
@@ -243,6 +246,7 @@ public class A2dpSinkService extends ProfileService {
 
         @Override
         public int getConnectionState(BluetoothDevice device, AttributionSource source) {
+            Attributable.setAttributionSource(device, source);
             A2dpSinkService service = getService(source);
             if (service == null) {
                 return BluetoothProfile.STATE_DISCONNECTED;
@@ -253,6 +257,7 @@ public class A2dpSinkService extends ProfileService {
         @Override
         public boolean setConnectionPolicy(BluetoothDevice device, int connectionPolicy,
                 AttributionSource source) {
+            Attributable.setAttributionSource(device, source);
             A2dpSinkService service = getService(source);
             if (service == null) {
                 return false;
@@ -262,6 +267,7 @@ public class A2dpSinkService extends ProfileService {
 
         @Override
         public int getConnectionPolicy(BluetoothDevice device, AttributionSource source) {
+            Attributable.setAttributionSource(device, source);
             A2dpSinkService service = getService(source);
             if (service == null) {
                 return BluetoothProfile.CONNECTION_POLICY_UNKNOWN;
@@ -271,6 +277,7 @@ public class A2dpSinkService extends ProfileService {
 
         @Override
         public boolean isA2dpPlaying(BluetoothDevice device, AttributionSource source) {
+            Attributable.setAttributionSource(device, source);
             A2dpSinkService service = getService(source);
             if (service == null) {
                 return false;
@@ -281,6 +288,7 @@ public class A2dpSinkService extends ProfileService {
         @Override
         public BluetoothAudioConfig getAudioConfig(BluetoothDevice device,
                 AttributionSource source) {
+            Attributable.setAttributionSource(device, source);
             A2dpSinkService service = getService(source);
             if (service == null) {
                 return null;
@@ -523,7 +531,7 @@ public class A2dpSinkService extends ProfileService {
     public native void informAudioTrackGainNative(float gain);
 
     private void onConnectionStateChanged(byte[] address, int state) {
-        StackEvent event = StackEvent.connectionStateChanged(getDevice(address), state);
+        StackEvent event = StackEvent.connectionStateChanged(getAnonymousDevice(address), state);
         A2dpSinkStateMachine stateMachine = getOrCreateStateMachine(event.mDevice);
         stateMachine.sendMessage(A2dpSinkStateMachine.STACK_EVENT, event);
     }
@@ -545,7 +553,7 @@ public class A2dpSinkService extends ProfileService {
     }
 
     private void onAudioConfigChanged(byte[] address, int sampleRate, int channelCount) {
-        StackEvent event = StackEvent.audioConfigChanged(getDevice(address), sampleRate,
+        StackEvent event = StackEvent.audioConfigChanged(getAnonymousDevice(address), sampleRate,
                 channelCount);
         A2dpSinkStateMachine stateMachine = getOrCreateStateMachine(event.mDevice);
         stateMachine.sendMessage(A2dpSinkStateMachine.STACK_EVENT, event);
