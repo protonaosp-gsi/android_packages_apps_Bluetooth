@@ -16,7 +16,7 @@
 
 <resources xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
-    <string name="permlab_bluetoothShareManager" msgid="311492132450338925">"Downloadbeheer weergeven."</string>
+    <string name="permlab_bluetoothShareManager" msgid="311492132450338925">"Downloadbeheer tonen."</string>
     <string name="permdesc_bluetoothShareManager" msgid="8930572979123190223">"Hiermee krijgt de app toegang tot de beheerfunctie voor delen via bluetooth om deze functie te gebruiken voor het overdragen van bestanden."</string>
     <string name="permlab_bluetoothAcceptlist" msgid="2647575807648622053">"Toegang voor bluetooth-apparaat op toelatingslijst zetten."</string>
     <string name="permdesc_bluetoothAcceptlist" msgid="2406423665674766442">"Hiermee kan de app een bluetooth-apparaat tijdelijk op de toelatingslijst zetten, waardoor dat apparaat bestanden naar dit apparaat kan sturen zonder bevestiging van de gebruiker."</string>
@@ -37,7 +37,7 @@
     <string name="incoming_file_confirm_timeout_ok" msgid="1414676773249857278">"OK"</string>
     <string name="incoming_file_confirm_timeout_content" msgid="172779756093975981">"Er is een time-out opgetreden bij het accepteren van een inkomend bestand van \'<xliff:g id="SENDER">%1$s</xliff:g>\'"</string>
     <string name="incoming_file_confirm_Notification_title" msgid="5573329005298936903">"Inkomend bestand"</string>
-    <string name="incoming_file_confirm_Notification_content" msgid="3359694069319644738">"<xliff:g id="SENDER">%1$s</xliff:g> is klaar om <xliff:g id="FILE">%2$s</xliff:g> te verzenden"</string>
+    <string name="incoming_file_confirm_Notification_content" msgid="6237487486781004992">"<xliff:g id="SENDER">%1$s</xliff:g> is klaar om een bestand te sturen: <xliff:g id="FILE">%2$s</xliff:g>"</string>
     <string name="notification_receiving" msgid="4674648179652543984">"Delen via bluetooth: <xliff:g id="FILE">%1$s</xliff:g> ontvangen"</string>
     <string name="notification_received" msgid="3324588019186687985">"Delen via bluetooth: <xliff:g id="FILE">%1$s</xliff:g> ontvangen"</string>
     <string name="notification_received_fail" msgid="3619350997285714746">"Delen via bluetooth: bestand <xliff:g id="FILE">%1$s</xliff:g> niet ontvangen"</string>

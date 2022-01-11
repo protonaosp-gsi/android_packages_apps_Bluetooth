@@ -37,7 +37,7 @@
     <string name="incoming_file_confirm_timeout_ok" msgid="1414676773249857278">"ठीक है"</string>
     <string name="incoming_file_confirm_timeout_content" msgid="172779756093975981">"\"<xliff:g id="SENDER">%1$s</xliff:g>\" से आने वाली फ़ाइल स्वीकार करते हुए टाइम आउट हो गया."</string>
     <string name="incoming_file_confirm_Notification_title" msgid="5573329005298936903">"आवक फ़ाइल"</string>
-    <string name="incoming_file_confirm_Notification_content" msgid="3359694069319644738">"<xliff:g id="SENDER">%1$s</xliff:g> <xliff:g id="FILE">%2$s</xliff:g> भेजने के लिए तैयार है"</string>
+    <string name="incoming_file_confirm_Notification_content" msgid="6237487486781004992">"<xliff:g id="SENDER">%1$s</xliff:g>, इस फ़ाइल को भेजने के लिए तैयार है: <xliff:g id="FILE">%2$s</xliff:g>"</string>
     <string name="notification_receiving" msgid="4674648179652543984">"ब्लूटूथ शेयर: <xliff:g id="FILE">%1$s</xliff:g> पा रहा है"</string>
     <string name="notification_received" msgid="3324588019186687985">"ब्लूटूथ शेयर: <xliff:g id="FILE">%1$s</xliff:g> पाई गई"</string>
     <string name="notification_received_fail" msgid="3619350997285714746">"ब्लूटूथ शेयर: फ़ाइल <xliff:g id="FILE">%1$s</xliff:g> नहीं मिली"</string>
@@ -94,7 +94,7 @@
     <string name="status_forbidden" msgid="613956401054050725">"लक्ष्य डिवाइस द्वारा स्थानांतरण प्रतिबंधित किया गया."</string>
     <string name="status_canceled" msgid="6664490318773098285">"उपयोगकर्ता ने ट्रांसफर रद्द किया."</string>
     <string name="status_file_error" msgid="3671917770630165299">"मेमोरी समस्या."</string>
-    <string name="status_no_sd_card_nosdcard" msgid="573631036356922221">"कोई USB मेमोरी नहीं."</string>
+    <string name="status_no_sd_card_nosdcard" msgid="573631036356922221">"कोई USB स्टोरेज नहीं."</string>
     <string name="status_no_sd_card_default" msgid="396564893716701954">"कोई SD कार्ड नहीं. ट्रांसफ़र की गई फ़ाइलें सेव करने के लिए SD कार्ड लगाएं."</string>
     <string name="status_connection_error" msgid="947681831523219891">"कनेक्‍शन विफल."</string>
     <string name="status_protocol_error" msgid="3245444473429269539">"अनुरोध को सही तरह से प्रबंधित नहीं किया जा सकता."</string>
